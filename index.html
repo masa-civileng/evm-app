@@ -198,10 +198,10 @@
     <div>
       <div class="tabs">
         <button class="tab active" data-tab="preview">プレビュー / ROI</button>
-        <button class="tab" data-tab="magnify">magnify 出力</button>
         <button class="tab" data-tab="analyze">analyze 結果</button>
         <button class="tab" data-tab="orbit">点オービット</button>
         <button class="tab" data-tab="mode">モード形状</button>
+        <button class="tab" data-tab="magnify">magnify 出力</button>
         <button class="tab" data-tab="log">ログ</button>
       </div>
 
@@ -230,26 +230,6 @@
         </div>
       </div>
 
-      <!-- magnify -->
-      <div class="panel" data-panel="magnify">
-        <div class="card">
-          <h2>増幅プレビュー</h2>
-          <div class="stage">
-            <div><div class="lbl">原画 (current frame)</div>
-                 <canvas id="origCanvas" width="320" height="240"></canvas></div>
-            <div><div class="lbl">増幅後 (magnified)</div>
-                 <canvas id="magCanvas" width="320" height="240"></canvas></div>
-          </div>
-          <div class="bar"><i id="magbar"></i></div>
-          <div class="btnrow">
-            <button id="playMag" disabled>▶ ループ再生</button>
-            <button id="dlMag" disabled>増幅動画を保存 (.webm)</button>
-          </div>
-          <label class="chk" style="margin-top:4px"><input type="checkbox" id="ovOrbit" checked>
-            <span>オービットの動きを重畳（選定点の軌道＋現在位置）</span></label>
-          <p class="hint">増幅結果は全フレームをメモリに保持し、ループ再生します。保存はブラウザ対応の webm（VP8/VP9）です。<br>増幅動画の生成が完了すると、プレビューで打った<b>計測点があれば自動でオービット解析</b>（生成した帯域の周波数）を行い、増幅後（MAGNIFIED）に各点の楕円軌道＋現在位置マーカーを重畳して再生します。<b>モード形状も同じ周波数で自動計算</b>されます。計測点が無い場合は重畳なしの動画のみ表示します。倍率は点オービットタブの「倍率」で変更できます。</p>
-        </div>
-      </div>
 
       <!-- analyze -->
       <div class="panel" data-panel="analyze">
@@ -372,6 +352,26 @@
         </div>
       </div>
 
+      <!-- magnify -->
+      <div class="panel" data-panel="magnify">
+        <div class="card">
+          <h2>増幅プレビュー</h2>
+          <div class="stage">
+            <div><div class="lbl">原画 (current frame)</div>
+                 <canvas id="origCanvas" width="320" height="240"></canvas></div>
+            <div><div class="lbl">増幅後 (magnified)</div>
+                 <canvas id="magCanvas" width="320" height="240"></canvas></div>
+          </div>
+          <div class="bar"><i id="magbar"></i></div>
+          <div class="btnrow">
+            <button id="playMag" disabled>▶ ループ再生</button>
+            <button id="dlMag" disabled>増幅動画を保存 (.webm)</button>
+          </div>
+          <label class="chk" style="margin-top:4px"><input type="checkbox" id="ovOrbit" checked>
+            <span>オービットの動きを重畳（選定点の軌道＋現在位置）</span></label>
+          <p class="hint">増幅結果は全フレームをメモリに保持し、ループ再生します。保存はブラウザ対応の webm（VP8/VP9）です。<br>増幅動画の生成が完了すると、プレビューで打った<b>計測点があれば自動でオービット解析</b>（生成した帯域の周波数）を行い、増幅後（MAGNIFIED）に各点の楕円軌道＋現在位置マーカーを重畳して再生します。<b>モード形状も同じ周波数で自動計算</b>されます。計測点が無い場合は重畳なしの動画のみ表示します。倍率は点オービットタブの「倍率」で変更できます。</p>
+        </div>
+      </div>
       <!-- log -->
       <div class="panel" data-panel="log">
         <div class="card"><h2>ログ</h2><div class="log" id="log"></div></div>
