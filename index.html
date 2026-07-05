@@ -421,7 +421,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 /* ============================================================
    OpenCV ready — 複数CDNを順に試す
 ============================================================ */
-const APP_VER='v2026-07-05b (HEVC対応強化)';
+const APP_VER='v2026-07-05c (HEVCソフトデコード対応)';
 const OCV_CDNS=[
   "https://docs.opencv.org/4.10.0/opencv.js",
   "https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js",
@@ -557,7 +557,7 @@ async function loadVideoFile(f){
   // <video> が再生できないコーデック（iPhone標準の HEVC 等）は縦横が 0x0 になる
   const noNativeDecode=(!VW||!VH);
   if(noNativeDecode){
-    log('[load] ブラウザの<video>がこの動画をデコードできません（0x0）。iPhone標準の HEVC(H.265) の可能性が高いです。WebCodecs 直接デコードを試します…','er');
+    log('[load] ブラウザの標準再生（video要素）がこの動画をデコードできません（0x0）。iPhone標準の HEVC(H.265) の可能性が高いです。WebCodecs 直接デコードを試します…','er');
   }else{
     applyProcCap();   // 処理解像度の長辺上限
   }
@@ -644,8 +644,8 @@ async function loadVideoFile(f){
   if(!fast){
     if(noNativeDecode){
       // <video> も WebCodecs も不可 → 従来方式に落としても永遠に進まないため、明確に案内して終了
-      log('=== この動画はこのPC・ブラウザではデコードできません ===','er');
-      log('原因: iPhone標準の HEVC(H.265) コーデックにブラウザ/OSが対応していないためです。対処は次のいずれか:','hi');
+      log('=== この動画は変換されませんでした ===','er');
+      log('ブラウザ内ソフトウェアデコード（確認ダイアログでOK）を使うか、次のいずれかで恒久対応できます:','hi');
       log(' ① Windows: Microsoft Store で「HEVC ビデオ拡張機能」をインストール（再起動後に Chrome/Edge で再生可能になる場合があります）','hi');
       log(' ② iPhone側: 設定 → カメラ → フォーマット → 「互換性優先」にして撮影すると H.264 になり、どのPCでも読めます（今後の撮影におすすめ）','hi');
       log(' ③ 変換: ffmpeg -i 入力.MOV -c:v libx264 -pix_fmt yuv420p -an 出力.mp4','hi');
@@ -859,6 +859,109 @@ function finishExtractUI(fpsIn,stride,trimS,trimE,method){
   if(stride>1) log(`※ 間引き×${stride} のため実効サンプリングは ${(fpsIn/stride).toFixed(1)}fps 相当`,'hi');
 }
 
+/* ============================================================
+   ffmpeg.wasm ソフトウェアデコード（HEVC等、ブラウザ非対応コーデックの最終手段）
+   - ブラウザ/OSのコーデックに依存せず WASM 内で直接デコードする
+   - シングルスレッド版 core-st を使用（GitHub Pages は COOP/COEP ヘッダを
+     設定できず SharedArrayBuffer が使えないため、マルチスレッド版は不可）
+   - 初回のみ約25MBをCDNから取得。以後はブラウザキャッシュが効く
+============================================================ */
+let _ffmpeg=null, _ffmpegLoading=null;
+function loadScriptCDN(urls){
+  return new Promise((res,rej)=>{
+    const tryOne=i=>{
+      if(i>=urls.length){rej(new Error('CDN読込失敗: '+urls[0]));return;}
+      const s=document.createElement('script');
+      s.src=urls[i]; s.onload=()=>res(); s.onerror=()=>tryOne(i+1);
+      document.head.appendChild(s);
+    };
+    tryOne(0);
+  });
+}
+async function loadFFmpeg(onProgress){
+  if(_ffmpeg) return _ffmpeg;
+  if(_ffmpegLoading) return _ffmpegLoading;
+  _ffmpegLoading=(async()=>{
+    if(!window.FFmpeg){
+      await loadScriptCDN([
+        'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js',
+        'https://unpkg.com/@ffmpeg/ffmpeg@0.11.6/dist/ffmpeg.min.js'
+      ]);
+    }
+    const ff=FFmpeg.createFFmpeg({
+      mainName:'main',                       // core-st（シングルスレッド）では必須
+      corePath:'https://cdn.jsdelivr.net/npm/@ffmpeg/core-st@0.11.1/dist/ffmpeg-core.js',
+      log:false,
+      progress:p=>{ if(onProgress && p && typeof p.ratio==='number') onProgress(p.ratio); }
+    });
+    await ff.load();                         // 約25MBのWASMを取得
+    _ffmpeg=ff;
+    return ff;
+  })();
+  try{ return await _ffmpegLoading; }
+  finally{ _ffmpegLoading=null; }
+}
+let _hevcConfirmed=false;   // 同一セッションでの再確認を省略
+async function extractByFFmpeg(f,fpsUse,trimS,trimE){
+  if(!_hevcConfirmed){
+    const ok=window.confirm(
+`このPC・ブラウザは HEVC(H.265) のハードウェアデコードに対応していません。
+
+代わりにソフトウェアデコーダ（ffmpeg.wasm 約25MB）をダウンロードして
+ブラウザ内で変換できます。動画データは外部に送信されません。
+
+・初回のみデコーダの取得に少し時間がかかります
+・変換はソフトウェア処理のため、5秒の区間で数十秒〜数分かかることがあります
+（恒久対策は、Windowsの「HEVC ビデオ拡張機能」導入、または iPhone の
+　設定→カメラ→フォーマット→互換性優先 での撮影をおすすめします）
+
+続行しますか？`);
+    if(!ok){ log('[hevc] ソフトウェアデコードをキャンセルしました','hi'); return false; }
+    _hevcConfirmed=true;
+  }
+  const stride=Math.max(1,parseInt($('stride').value)||1);
+  $('vidInfo').textContent='HEVCソフトウェアデコーダ読込中…（初回のみ 約25MB）';
+  $('loadbar').style.width='5%';
+  log('[hevc] ffmpeg.wasm を読み込み中…（初回のみCDNから約25MB）','');
+  const t0=performance.now();
+  const ff=await loadFFmpeg(r=>{
+    $('loadbar').style.width=`${20+Math.min(78,78*r)}%`;
+    $('vidInfo').textContent=`HEVCソフトウェアデコード中… ${(r*100).toFixed(0)}%（区間 ${trimS}〜${trimE}s）`;
+  });
+  log(`[hevc] デコーダ準備完了（${((performance.now()-t0)/1000).toFixed(1)}s）→ 変換開始`,'');
+  $('vidInfo').textContent='HEVCソフトウェアデコード中…（ファイル転送）';
+  ff.FS('writeFile','in.mov',new Uint8Array(await f.arrayBuffer()));
+  // 生RGBAで直接出力（再エンコード無し＝最速・無劣化）。回転メタデータは ffmpeg が自動補正
+  const vf=`scale=${VW}:${VH}`+(stride>1?`,select='not(mod(n\\,${stride}))'`:'');
+  const span=Math.max(0.1,trimE-trimS);
+  try{
+    await ff.run('-ss',String(trimS),'-i','in.mov','-t',String(span),
+                 '-vf',vf,'-vsync','0','-an',
+                 '-f','rawvideo','-pix_fmt','rgba','out.raw');
+  }catch(e){
+    log('[hevc] 変換に失敗しました: '+((e&&e.message)||e),'er');
+    try{ff.FS('unlink','in.mov');}catch(_){}
+    return false;
+  }
+  let raw;
+  try{ raw=ff.FS('readFile','out.raw'); }
+  catch(e){ log('[hevc] 出力を取得できませんでした','er'); try{ff.FS('unlink','in.mov');}catch(_){} return false; }
+  try{ff.FS('unlink','in.mov');}catch(_){}
+  try{ff.FS('unlink','out.raw');}catch(_){}
+  const fb=VW*VH*4, n=Math.floor(raw.length/fb);
+  if(!n){ log('[hevc] フレームを取得できませんでした','er'); return false; }
+  const maxF=parseInt($('maxFrames').value)||0;
+  const take=maxF?Math.min(n,maxF):n;
+  for(let i=0;i<take;i++){
+    frames.push(new ImageData(
+      new Uint8ClampedArray(raw.buffer,raw.byteOffset+i*fb,fb).slice(),VW,VH));
+  }
+  firstFrameImg=frames[0]; drawPick();
+  log(`[hevc] ソフトウェアデコード完了: ${frames.length} 枚（${((performance.now()-t0)/1000).toFixed(1)} 秒）`,'ok');
+  finishExtractUI(fpsUse,stride,trimS,trimE,'HEVCソフトデコード');
+  return true;
+}
+
 async function extractByWebCodecs(f,metaFps,fpsWasAuto,trimS,trimE){
   if(!('VideoDecoder' in window)) { log('[fast] WebCodecs 非対応ブラウザ → 従来方式','er'); return false; }
   const isMp4=/\.(mp4|m4v|mov)$/i.test(f.name)||/mp4|quicktime/.test(f.type);
@@ -900,7 +1003,9 @@ async function extractByWebCodecs(f,metaFps,fpsWasAuto,trimS,trimE){
   const track=info.videoTracks[0];
 
   // --- <video> が 0x0 のとき（HEVC等）は解像度をコンテナから取得 ---
+  let derivedDims=false;
   if(!VW||!VH){
+    derivedDims=true;
     const rot0=trackRotation(track);
     let w=track.video.width, h=track.video.height;
     if(rot0===90||rot0===270){const t=w;w=h;h=t;}
@@ -963,7 +1068,15 @@ async function extractByWebCodecs(f,metaFps,fpsWasAuto,trimS,trimE){
       if(sup.supported){ config=c; break; }
     }catch(e){ /* 次の候補へ */ }
   }
-  if(!config){ log(`[fast] コーデック ${track.codec} はWebCodecs非対応 → 従来方式`,'er'); return false; }
+  if(!config){
+    log(`[fast] コーデック ${track.codec} はWebCodecs非対応`,'er');
+    if(derivedDims){
+      // ネイティブ再生も不可（0x0）→ 従来方式は動かないので ffmpeg.wasm ソフトデコードへ
+      return await extractByFFmpeg(f,metaFps,trimS,trimE);
+    }
+    log('[fast] → 従来方式へフォールバック','');
+    return false;
+  }
 
   const rot=trackRotation(track);
   if(rot) log(`[fast] 回転メタデータ ${rot}° を補正して展開します`,'');
