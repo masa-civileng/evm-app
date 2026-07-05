@@ -126,10 +126,10 @@
       <div class="card" style="margin-top:16px">
         <h2>共通設定</h2>
         <div class="row">
-          <label class="field"><span>fps（上書き / 0=メタ）</span>
-            <input type="number" id="fps" value="200" step="1" min="0"></label>
-          <label class="field"><span>最大フレーム数（0=全部）</span>
-            <input type="number" id="maxFrames" value="1200" step="1" min="0"></label>
+          <label class="field"><span>fps（0=自動検出 / 手入力で上書き）</span>
+            <input type="number" id="fps" value="0" step="1" min="0"></label>
+          <label class="field"><span>最大フレーム数（読込時に自動入力）</span>
+            <input type="number" id="maxFrames" value="0" step="1" min="0"></label>
         </div>
         <div class="row">
           <label class="field"><span>フレーム間引き stride（1=間引きなし）</span>
@@ -140,8 +140,8 @@
         <div class="row">
           <label class="field"><span>読込開始 秒</span>
             <input type="number" id="trimStart" value="0" step="0.5" min="0"></label>
-          <label class="field"><span>読込終了 秒（0=最後まで）</span>
-            <input type="number" id="trimEnd" value="0" step="0.5" min="0"></label>
+          <label class="field"><span>読込終了 秒（0=最後まで / 初期値5秒）</span>
+            <input type="number" id="trimEnd" value="5" step="0.5" min="0"></label>
         </div>
         <p class="hint">読み込みは動画を等倍再生しながら各フレームを取得します（シークしないので 6000fr でも実時間ベースで完了）。フレームは RGBA 生データで保持するため <b>幅×高さ×4 byte/枚</b>（640×480≈1.2MB、1920×1080≈8.3MB）。magnify は増幅後フレームも同量保持するので、フルHD 1200枚だと約 9.5GB×2 となりタブが落ちます。<b>長辺上限</b>で縮小（640 なら フルHD比 1/9）し、長尺は<b>読込区間</b>で必要な時間帯だけを切り出すか stride で間引いてください。読み込み前に必要メモリを自動見積もりし、大きすぎる場合は警告を出します。周波数分解能は Δf=1/T なので、卓越振動数を見るだけなら 10〜30 秒あれば十分です。</p>
       </div>
@@ -245,9 +245,9 @@
             <button id="playMag" disabled>▶ ループ再生</button>
             <button id="dlMag" disabled>増幅動画を保存 (.webm)</button>
           </div>
-          <label class="chk" style="margin-top:4px"><input type="checkbox" id="ovOrbit">
+          <label class="chk" style="margin-top:4px"><input type="checkbox" id="ovOrbit" checked>
             <span>オービットの動きを重畳（選定点の軌道＋現在位置）</span></label>
-          <p class="hint">増幅結果は全フレームをメモリに保持し、ループ再生します。保存はブラウザ対応の webm（VP8/VP9）です。<br>「オービットの動きを重畳」をオンにすると、<b>点オービット</b>タブで解析した各計測点の楕円軌道と、フレーム時刻に同期して軌道上を動くマーカーを増幅動画（再生・保存の両方）に描き込みます。倍率は点オービットタブの「倍率」を使います（先にオービット解析を実行してください）。</p>
+          <p class="hint">増幅結果は全フレームをメモリに保持し、ループ再生します。保存はブラウザ対応の webm（VP8/VP9）です。<br>増幅動画の生成が完了すると、プレビューで打った<b>計測点があれば自動でオービット解析</b>（生成した帯域の周波数）を行い、増幅後（MAGNIFIED）に各点の楕円軌道＋現在位置マーカーを重畳して再生します。<b>モード形状も同じ周波数で自動計算</b>されます。計測点が無い場合は重畳なしの動画のみ表示します。倍率は点オービットタブの「倍率」で変更できます。</p>
         </div>
       </div>
 
@@ -557,12 +557,26 @@ async function loadVideoFile(f){
   }
   const spanSec=trimE-trimS;
 
-  // --- メモリ事前見積もり ---
-  const fpsGuess=parseFloat($('fps').value)||30;   // 見積もり用（未入力なら30と仮定）
+  // --- fps の決定（0=自動検出して「共通設定」に自動入力 / 手入力があればそれを優先） ---
+  const fpsField=parseFloat($('fps').value);
+  let metaFps;
+  if(fpsField>0){
+    metaFps=fpsField;
+    log(`動画: ${f.name}  ${VW}x${VH}  duration=${v.duration.toFixed(2)}s  fps=${fpsField}（手入力を使用）`);
+  }else{
+    metaFps=await guessFps(v);
+    $('fps').value=metaFps;
+    log(`動画: ${f.name}  ${VW}x${VH}  duration=${v.duration.toFixed(2)}s  fps≈${metaFps}（自動検出→共通設定に入力）`,'hi');
+    log('※ スロー撮影動画などで実際の撮影fpsと異なる場合は、fps欄を手動で修正して読み込み直してください','');
+  }
+
+  // --- 最大フレーム数の自動入力（区間 × fps ÷ stride） ---
   const strideEst=Math.max(1,parseInt($('stride').value)||1);
-  const maxFEst=parseInt($('maxFrames').value)||0;
-  let estFrames=Math.floor(spanSec*fpsGuess/strideEst);
-  if(maxFEst>0) estFrames=Math.min(estFrames,maxFEst);
+  const estFrames=Math.max(1,Math.floor(spanSec*metaFps/strideEst));
+  $('maxFrames').value=estFrames;
+  log(`[load] 最大フレーム数=${estFrames} を自動入力（区間${spanSec.toFixed(1)}s × ${metaFps}fps ÷ stride ${strideEst}）`,'');
+
+  // --- メモリ事前見積もり ---
   const estLoadGB=estFrames*VW*VH*4/1073741824;          // 読み込みのみ
   const estTotalGB=estLoadGB*2;                          // magnify 実行時（増幅フレームも保持）
   log(`[load] 見積もり: 区間 ${trimS.toFixed(1)}〜${trimE.toFixed(1)}s / 約${estFrames}枚 / `
@@ -572,7 +586,7 @@ async function loadVideoFile(f){
   if(estTotalGB>2){
     // 対策の目安を計算して提示
     const okFrames=Math.floor(1*1073741824/(VW*VH*4));   // 読み込み1GBに収まる枚数
-    const sugSec=Math.max(5,Math.floor(okFrames*strideEst/fpsGuess));
+    const sugSec=Math.max(5,Math.floor(okFrames*strideEst/metaFps));
     const sugStride=Math.ceil(estFrames/okFrames)*strideEst;
     const msg=
 `メモリ使用量が大きく、ブラウザのタブが落ちる可能性があります。
@@ -599,16 +613,6 @@ async function loadVideoFile(f){
     log('[load] 警告を確認のうえ続行します','er');
   }
 
-  // fps欄に値があればメタ推定は不要（推定の再生待ちでハングするのを避ける）
-  const fpsField=parseFloat($('fps').value);
-  let metaFps;
-  if(fpsField>0){
-    metaFps=fpsField;
-    log(`動画: ${f.name}  ${VW}x${VH}  duration=${v.duration.toFixed(2)}s  fps=${fpsField}（手入力を使用）`);
-  }else{
-    metaFps=await guessFps(v);
-    log(`動画: ${f.name}  ${VW}x${VH}  duration=${v.duration.toFixed(2)}s  meta-fps≈${metaFps}`);
-  }
   await extractFrames(v,metaFps,trimS,trimE);
   URL.revokeObjectURL(url);
   refreshButtons();
@@ -1906,6 +1910,36 @@ async function runMagnify(){
 
   await evmReconstruct(small,sw,sh,T,pxCount);
   log(`[magnify] 完了: ${magFrames.length} frames 増幅`,'ok');
+  await autoAfterMagnify((low+high)/2);
+}
+
+/* ============================================================
+   増幅完了後の自動パイプライン:
+   計測点があれば同じ周波数でオービット解析 → モード形状も自動計算
+   → magnify タブに戻って重畳付きループ再生を開始
+============================================================ */
+async function autoAfterMagnify(fc){
+  if(!(fc>0)) return;
+  // 点オービット（計測点がある場合のみ / item: 点未設定なら動画のみ）
+  if(measurePts.length){
+    try{
+      $('orbFreq').value=fc.toFixed(2);
+      await runOrbit();
+      log(`[auto] 点オービットを f=${fc.toFixed(2)}Hz で自動解析（重畳に使用）`,'ok');
+    }catch(err){ log('[auto] オービット自動解析でエラー: '+(err.message||err),'er'); }
+  }else{
+    log('[auto] 計測点が未設定のため重畳なし（動画のみ）。プレビューの点モードで点を打つと自動で重畳されます','');
+  }
+  // モード形状（同じ周波数で自動計算）
+  try{
+    $('modeFreq').value=fc.toFixed(2);
+    if(typeof stopModeAnim==='function') stopModeAnim();
+    await runModeShape();
+    log(`[auto] モード形状を f=${fc.toFixed(2)}Hz で自動計算`,'ok');
+  }catch(err){ log('[auto] モード形状の自動計算でエラー: '+(err.message||err),'er'); }
+  // magnify タブへ戻り、重畳付きループ再生を自動開始
+  showTab('magnify');
+  if(magFrames.length && !playing) $('playMag').click();
 }
 
 /* ============================================================
@@ -1954,6 +1988,9 @@ async function runSpectralMagnify(){
 
   await evmReconstruct(small,sw,sh,T,pxCount);
   log(`[spectral] 完了: ${magFrames.length} frames（帯域 ${flo}-${fhi}Hz ×${alpha}）`,'ok');
+  // ピーク候補で選んだ周波数があればそれを、無ければ帯域中心を自動解析に使う
+  const fc=($('sbPeakSel')&&$('sbPeakSel').value) ? +$('sbPeakSel').value : (flo+fhi)/2;
+  await autoAfterMagnify(fc);
 }
 
 function drawScaled(canvas,imgData){
