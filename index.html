@@ -90,7 +90,12 @@
         color:var(--mut)}
   video{display:none}
   .canvwrap{position:relative;display:inline-block}
-  #pickCanvas{cursor:crosshair}
+  #pickCanvas{cursor:crosshair;touch-action:none}
+  .nud{min-width:44px}
+  @media (pointer:coarse){
+    button{padding:10px 14px;font-size:14px}
+    .nud{min-width:48px;font-size:16px}
+  }
   details{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
   summary{cursor:pointer;color:var(--mut);font-size:12px;user-select:none}
   a{color:var(--acc)}
@@ -207,12 +212,21 @@
           <div class="canvwrap"><canvas id="pickCanvas" width="640" height="480"></canvas></div>
           <div class="btnrow" style="margin-top:8px">
             <label class="chk"><input type="checkbox" id="pointMode"> 点モード（クリックで計測点を追加）</label>
+            <button id="undoPt">1点戻す</button>
             <button id="clearPts">点を全消去</button>
             <button id="zoomReset" disabled>拡大リセット</button>
             <span class="hint" style="align-self:center">ズーム <b id="zoomLbl">×1.0</b></span>
           </div>
-          <p class="hint">通常はドラッグで ROI を矩形選択します。<b>点モード</b>をオンにすると、クリックした位置に計測点を複数打てます（オービット解析用）。点を打ったら「点オービット」タブで周波数を選んで解析します。<br>
-          <b>拡大操作：</b>マウスホイールでカーソル位置を中心にズーム（最大 ×20）、<b>Shift＋ドラッグ</b>またはホイールボタンドラッグで表示範囲を移動、<b>ダブルクリック</b>で等倍に戻ります（点モード中はダブルクリック無効。「拡大リセット」ボタンを使用）。タッチはピンチで拡大・2本指で移動。座標はズームしても元画像の画素で記録されるため、細かい箇所も正確に選べます。</p>
+          <div class="btnrow" style="margin-top:6px">
+            <span class="hint" style="align-self:center">最後の点を1pxずつ微調整:</span>
+            <button class="nud" data-dx="-1" data-dy="0">◀</button>
+            <button class="nud" data-dx="0" data-dy="-1">▲</button>
+            <button class="nud" data-dx="0" data-dy="1">▼</button>
+            <button class="nud" data-dx="1" data-dy="0">▶</button>
+          </div>
+          <p class="hint">通常はドラッグで ROI を矩形選択します。確定した ROI は<b>四隅の■ハンドル</b>をドラッグして微調整できます。<b>点モード</b>をオンにすると計測点を複数打てます（オービット解析用）。<br>
+          <b>拡大操作：</b>マウスホイールでカーソル位置を中心にズーム（最大 ×20）、<b>Shift＋ドラッグ</b>またはホイールボタンドラッグで表示範囲を移動、<b>ダブルクリック</b>で等倍に戻ります（点モード中はダブルクリック無効。「拡大リセット」ボタンを使用）。<br>
+          <b>スマホ・タッチ操作：</b>指で触れている間は<b>拡大ルーペ</b>が画面隅に表示され、指を動かして位置を合わせ、<b>指を離した位置で確定</b>します（押した瞬間ではありません）。誤って触れた場合は<b>2本目の指を置くとキャンセル</b>。ピンチで拡大、2本指ドラッグで表示移動。確定後は「◀▲▼▶」で最後の点を 1px ずつ動かせます。</p>
         </div>
       </div>
 
@@ -388,6 +402,9 @@ let lastOrbits=null;    // オービット解析結果
 let pickView={scale:1, ox:0, oy:0};   // ox,oy = 表示左上の画像座標
 let pickBmp=null;                     // firstFrameImg のオフスクリーンキャッシュ
 let panning=false, panStart=null;     // Shift/中ボタンドラッグでパン
+let touchAim=null;                    // タッチ照準 {ix,iy}（指を離した位置で確定）
+let isTouchDrag=false;                // 現在のドラッグがタッチ由来か
+let roiEditCorner=-1;                 // ドラッグ中のROI角ハンドル (0=左上,1=右上,2=左下,3=右下)
 const PICK_ZMAX=20;
 let pinchPrev=null;                   // タッチのピンチ状態 {dist, cx, cy}
 
@@ -476,6 +493,7 @@ $('file').onchange=e=>{const f=e.target.files[0]; if(f) loadVideoFile(f);};
 async function loadVideoFile(f){
   frames=[]; magFrames=[]; firstFrameImg=null; roiClicks=[];
   dragging=false; dragStart=null; dragCur=null; lastFFT=null;
+  touchAim=null; isTouchDrag=false; roiEditCorner=-1; panning=false;
   measurePts=[]; lastOrbits=null;
   lastMode=null; if(typeof stopModeAnim==='function') stopModeAnim();
   if($('modePlay')) $('modePlay').disabled=true;
@@ -780,19 +798,59 @@ function resetPickView(){
   pickView={scale:1, ox:0, oy:0};
   updateZoomLabel(); redrawPick();
 }
+/* ROI角ハンドルの掴み判定: 画面上14px相当以内なら角番号を返す */
+function hitRoiCorner(ix,iy){
+  if($('rx0').value===''||$('rx1').value==='') return -1;
+  const x0=+$('rx0').value,y0=+$('ry0').value,x1=+$('rx1').value,y1=+$('ry1').value;
+  const cs=[[x0,y0],[x1,y0],[x0,y1],[x1,y1]];
+  const th=(isTouchLikely()?20:14)/pickView.scale;
+  let best=-1,bd=1e9;
+  cs.forEach(([cx,cy],i)=>{const d=Math.hypot(ix-cx,iy-cy);if(d<th&&d<bd){bd=d;best=i;}});
+  return best;
+}
+function isTouchLikely(){return window.matchMedia&&matchMedia('(pointer:coarse)').matches;}
+function applyCorner(i,px,py){
+  px=Math.round(px);py=Math.round(py);
+  if(i===0){$('rx0').value=px;$('ry0').value=py;}
+  else if(i===1){$('rx1').value=px;$('ry0').value=py;}
+  else if(i===2){$('rx0').value=px;$('ry1').value=py;}
+  else{$('rx1').value=px;$('ry1').value=py;}
+  $('autoRoi').checked=false;
+}
+function normalizeRoi(){
+  let x0=+$('rx0').value,y0=+$('ry0').value,x1=+$('rx1').value,y1=+$('ry1').value;
+  $('rx0').value=Math.min(x0,x1);$('rx1').value=Math.max(x0,x1);
+  $('ry0').value=Math.min(y0,y1);$('ry1').value=Math.max(y0,y1);
+}
 function beginDrag(e){
   if(!firstFrameImg) return;
   e.preventDefault();
+  const isTouch=!!e.touches;
   // パン：Shift+ドラッグ or ホイールボタンドラッグ（ズーム中の移動用）
   if(e.shiftKey || e.button===1){
     panning=true;
     panStart={px:canvasPx(e), ox:pickView.ox, oy:pickView.oy};
     return;
   }
-  // 点モード：クリック位置に計測点を追加してドラッグ処理はしない
-  if($('pointMode') && $('pointMode').checked){
-    const [px,py]=canvasXY(e);
-    // ダブルクリック等による同一箇所への誤った二重追加を防止
+  const [px,py]=canvasXY(e);
+  const inPoint=$('pointMode') && $('pointMode').checked;
+  // ROI角ハンドルの掴み（点モード以外）→ ドラッグで角を微調整
+  if(!inPoint){
+    const c=hitRoiCorner(px,py);
+    if(c>=0){
+      roiEditCorner=c; isTouchDrag=isTouch;
+      if(isTouch) touchAim={ix:px,iy:py};
+      redrawPick(); return;
+    }
+  }
+  // 点モード
+  if(inPoint){
+    if(isTouch){
+      // タッチ：押した瞬間には確定せず、ルーペ照準を開始。指を離した位置で確定
+      isTouchDrag=true; touchAim={ix:px,iy:py};
+      redrawPick(); return;
+    }
+    // マウス：従来どおりクリックで即追加
     const now=performance.now(), lp=measurePts[measurePts.length-1];
     if(lp && now-(lp._t||0)<300 && Math.hypot(px-lp.x,py-lp.y)<4) return;
     measurePts.push({x:px,y:py,_t:now});
@@ -800,7 +858,8 @@ function beginDrag(e){
     redrawPick();
     return;
   }
-  dragging=true; dragStart=canvasXY(e); dragCur=dragStart; roiClicks=[];
+  dragging=true; isTouchDrag=isTouch; dragStart=[px,py]; dragCur=dragStart; roiClicks=[];
+  if(isTouch) touchAim={ix:px,iy:py};
   redrawPick();
 }
 function moveDrag(e){
@@ -812,13 +871,51 @@ function moveDrag(e){
     clampView(); redrawPick();
     return;
   }
+  // ROI角ハンドルのドラッグ中
+  if(roiEditCorner>=0){
+    e.preventDefault();
+    const [px,py]=canvasXY(e);
+    applyCorner(roiEditCorner,px,py);
+    if(isTouchDrag) touchAim={ix:px,iy:py};
+    redrawPick(); return;
+  }
+  // タッチ点モードの照準移動
+  if(isTouchDrag && touchAim && !dragging){
+    e.preventDefault();
+    const [px,py]=canvasXY(e);
+    touchAim={ix:px,iy:py};
+    redrawPick(); return;
+  }
   if(!dragging) return;
   e.preventDefault();
   dragCur=canvasXY(e);
+  if(isTouchDrag) touchAim={ix:dragCur[0],iy:dragCur[1]};
   redrawPick();
 }
 function endDrag(e){
   if(panning){panning=false; panStart=null; return;}
+  // ROI角ハンドル確定
+  if(roiEditCorner>=0){
+    e.preventDefault();
+    normalizeRoi();
+    log(`[ROI] 角ハンドルで調整 (${$('rx0').value},${$('ry0').value})-(${$('rx1').value},${$('ry1').value})`,'');
+    roiEditCorner=-1; touchAim=null; isTouchDrag=false;
+    redrawPick(); return;
+  }
+  // タッチ点モード：指を離した位置で確定
+  if(isTouchDrag && touchAim && !dragging){
+    e.preventDefault();
+    if($('pointMode') && $('pointMode').checked){
+      const px=Math.round(touchAim.ix), py=Math.round(touchAim.iy);
+      const now=performance.now(), lp=measurePts[measurePts.length-1];
+      if(!(lp && now-(lp._t||0)<300 && Math.hypot(px-lp.x,py-lp.y)<4)){
+        measurePts.push({x:px,y:py,_t:now});
+        log(`[点] #${measurePts.length} 追加 (${px},${py})　※タッチ確定 / ズーム ×${pickView.scale.toFixed(1)}`,'');
+      }
+    }
+    touchAim=null; isTouchDrag=false;
+    redrawPick(); return;
+  }
   if(!dragging) return;
   e.preventDefault();
   dragging=false;
@@ -840,7 +937,7 @@ function endDrag(e){
     $('autoRoi').checked=false;
     log(`[ROI] ドラッグ矩形指定 (${x0},${y0})-(${x1},${y1})  size ${x1-x0}x${y1-y0}px`,'');
   }
-  dragStart=dragCur=null;
+  dragStart=dragCur=null; touchAim=null; isTouchDrag=false;
   redrawPick();
 }
 const _pc=$('pickCanvas');
@@ -869,7 +966,12 @@ function pinchState(e){
           cy:((t0.clientY+t1.clientY)/2-r.top)*sy};
 }
 _pc.addEventListener('touchstart',e=>{
-  if(e.touches.length===2){e.preventDefault(); dragging=false; pinchPrev=pinchState(e); return;}
+  if(e.touches.length===2){
+    e.preventDefault();
+    // 2本目の指で進行中の操作をキャンセル（誤タッチの取り消しに使える）
+    dragging=false; roiEditCorner=-1; touchAim=null; isTouchDrag=false;
+    pinchPrev=pinchState(e); redrawPick(); return;
+  }
   beginDrag(e);
 },{passive:false});
 _pc.addEventListener('touchmove',e=>{
@@ -914,11 +1016,16 @@ function redrawPick(){
     ctx.strokeRect(Math.min(ax,bx),Math.min(ay,by),Math.abs(bx-ax),Math.abs(by-ay));
     ctx.restore();
   }
-  // 確定済みROI
+  // 確定済みROI ＋ 四隅の角ハンドル（ドラッグで微調整可能）
   ctx.strokeStyle='#3fd0c9'; ctx.lineWidth=2/s;
   if($('rx0').value!==''&&$('rx1').value!==''){
     const x0=+$('rx0').value,y0=+$('ry0').value,x1=+$('rx1').value,y1=+$('ry1').value;
     ctx.strokeRect(x0,y0,x1-x0,y1-y0);
+    const hs=5/s;
+    [[x0,y0],[x1,y0],[x0,y1],[x1,y1]].forEach(([cx,cy],i)=>{
+      ctx.fillStyle=(i===roiEditCorner)?'#f2a65a':'#3fd0c9';
+      ctx.fillRect(cx-hs,cy-hs,2*hs,2*hs);
+    });
   }
   ctx.fillStyle='#f2a65a';
   roiClicks.forEach(([x,y])=>{ctx.beginPath();ctx.arc(x,y,4/s,0,7);ctx.fill();});
@@ -931,9 +1038,70 @@ function redrawPick(){
     ctx.fillText('#'+(i+1), p.x+8/s, p.y-6/s);
   });
   ctx.setTransform(1,0,0,1,0,0);
+  // タッチ照準（指を離すと確定）: 照準マーカー＋拡大ルーペ
+  if(touchAim && pickBmp) drawLoupe(ctx);
+}
+/* タッチ用ルーペ: 照準位置の拡大像を画面隅に表示（指で隠れない位置） */
+function drawLoupe(ctx){
+  const c=$('pickCanvas');
+  const s=pickView.scale;
+  const ix=touchAim.ix, iy=touchAim.iy;
+  const ax=(ix-pickView.ox)*s, ay=(iy-pickView.oy)*s;   // 照準の画面位置
+  // 照準マーカー（本体ビュー上）
+  ctx.strokeStyle='#e5534b'; ctx.lineWidth=1.5;
+  ctx.beginPath(); ctx.arc(ax,ay,12,0,7); ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(ax-18,ay);ctx.lineTo(ax-6,ay); ctx.moveTo(ax+6,ay);ctx.lineTo(ax+18,ay);
+  ctx.moveTo(ax,ay-18);ctx.lineTo(ax,ay-6); ctx.moveTo(ax,ay+6);ctx.lineTo(ax,ay+18);
+  ctx.stroke();
+  // ルーペ本体（照準と反対側の上隅へ配置して指と重ならないようにする）
+  const R=Math.min(80,Math.floor(Math.min(c.width,c.height)*0.24));
+  const m=Math.max(6,s*2.5);              // ルーペ倍率
+  let LX=c.width-R-12, LY=R+12;
+  if(ax>c.width*0.55 && ay<c.height*0.55) LX=R+12;   // 右上に指があるなら左上へ
+  ctx.save();
+  ctx.beginPath(); ctx.arc(LX,LY,R,0,7); ctx.clip();
+  ctx.fillStyle='#000'; ctx.fillRect(LX-R,LY-R,2*R,2*R);
+  ctx.imageSmoothingEnabled=false;
+  const sw=2*R/m;                          // 元画像から切り出す幅
+  ctx.drawImage(pickBmp, ix-sw/2, iy-sw/2, sw, sw, LX-R, LY-R, 2*R, 2*R);
+  // ルーペ内に既存の計測点も表示（位置関係の確認用）
+  measurePts.forEach(p=>{
+    const px=LX+(p.x-ix)*m, py=LY+(p.y-iy)*m;
+    if(Math.hypot(px-LX,py-LY)<R-4){
+      ctx.strokeStyle='#e5534b'; ctx.lineWidth=1.5; ctx.beginPath();
+      ctx.moveTo(px-6,py);ctx.lineTo(px+6,py);ctx.moveTo(px,py-6);ctx.lineTo(px,py+6);ctx.stroke();
+    }
+  });
+  // 中心十字＝確定位置
+  ctx.strokeStyle='#3fd0c9'; ctx.lineWidth=1.5;
+  ctx.beginPath();
+  ctx.moveTo(LX-16,LY);ctx.lineTo(LX+16,LY);ctx.moveTo(LX,LY-16);ctx.lineTo(LX,LY+16);
+  ctx.stroke();
+  ctx.restore();
+  // 枠と座標表示
+  ctx.strokeStyle='#3fd0c9'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.arc(LX,LY,R,0,7); ctx.stroke();
+  ctx.fillStyle='#3fd0c9'; ctx.font='12px monospace'; ctx.textAlign='center';
+  ctx.fillText(`(${Math.round(ix)}, ${Math.round(iy)})`, LX, LY+R+16);
+  ctx.textAlign='start';
 }
 ['rx0','ry0','rx1','ry1'].forEach(id=>$(id).oninput=redrawPick);
 if($('clearPts')) $('clearPts').onclick=()=>{measurePts=[];redrawPick();log('[点] 全消去','');};
+if($('undoPt')) $('undoPt').onclick=()=>{
+  if(!measurePts.length){log('[点] 取り消す点がありません','er');return;}
+  const p=measurePts.pop();
+  log(`[点] #${measurePts.length+1} (${p.x},${p.y}) を取り消し`,'');
+  redrawPick();
+};
+document.querySelectorAll('.nud').forEach(b=>b.onclick=()=>{
+  if(!measurePts.length){log('[点] 微調整する点がありません（先に点を追加）','er');return;}
+  const p=measurePts[measurePts.length-1];
+  p.x=Math.max(0,Math.min(VW,p.x+parseInt(b.dataset.dx)));
+  p.y=Math.max(0,Math.min(VH,p.y+parseInt(b.dataset.dy)));
+  log(`[点] #${measurePts.length} → (${p.x},${p.y})`,'');
+  redrawPick();
+});
 
 /* ============================================================
    信号処理ヘルパ（Butterworth bandpass, FFT）
