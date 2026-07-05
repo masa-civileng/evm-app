@@ -1,0 +1,2089 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EVM Web — Eulerian Video Magnification</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c232d; --line:#2a3441;
+    --ink:#e6edf3; --mut:#8b98a8; --acc:#3fd0c9; --acc2:#f2a65a;
+    --warn:#e5534b; --good:#57c98a;
+    --mono:"SFMono-Regular",ui-monospace,"Cascadia Code","Consolas",monospace;
+    --sans:"Inter",-apple-system,"Segoe UI","Hiragino Sans","Noto Sans JP",sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+       font-size:14px;line-height:1.5}
+  header{padding:18px 22px;border-bottom:1px solid var(--line);
+         display:flex;align-items:baseline;gap:14px;flex-wrap:wrap}
+  header h1{margin:0;font-size:18px;font-weight:650;letter-spacing:.3px}
+  header .sub{color:var(--mut);font-size:12.5px}
+  header .ref{margin-left:auto;color:var(--mut);font-size:11.5px}
+  main{max-width:1180px;margin:0 auto;padding:20px 22px 60px}
+  .grid{display:grid;grid-template-columns:330px 1fr;gap:20px;align-items:start}
+  @media(max-width:880px){.grid{grid-template-columns:1fr}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+        padding:16px 16px 18px}
+  .card h2{margin:0 0 12px;font-size:13px;text-transform:uppercase;
+           letter-spacing:1px;color:var(--acc);font-weight:600}
+  label.field{display:block;margin:10px 0}
+  label.field > span{display:block;color:var(--mut);font-size:12px;margin-bottom:4px}
+  input[type=number],input[type=text],select{
+    width:100%;background:var(--panel2);border:1px solid var(--line);
+    color:var(--ink);border-radius:6px;padding:7px 9px;font-family:var(--mono);
+    font-size:13px}
+  input[type=file]{width:100%;color:var(--mut);font-size:12px}
+  .drop{border:1.5px dashed var(--line);border-radius:9px;padding:18px 14px;
+        text-align:center;color:var(--mut);font-size:12.5px;cursor:pointer;
+        transition:.14s;background:var(--panel2)}
+  .drop:hover{border-color:var(--acc);color:var(--ink)}
+  .drop.over{border-color:var(--acc);background:rgba(63,208,201,.08);color:var(--acc)}
+  .drop .big{font-size:13.5px;color:var(--ink);margin-bottom:3px;font-weight:550}
+  .drop.over .big{color:var(--acc)}
+  .drop input{display:none}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .row3{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .roi-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:6px}
+  .roi-grid input{padding:6px 5px;text-align:center}
+  .chk{display:flex;align-items:center;gap:8px;margin:10px 0;cursor:pointer}
+  .chk input{width:16px;height:16px;accent-color:var(--acc)}
+  button{font-family:var(--sans);cursor:pointer;border-radius:7px;
+         border:1px solid var(--line);background:var(--panel2);color:var(--ink);
+         padding:9px 14px;font-size:13px;font-weight:550;transition:.12s}
+  button:hover:not(:disabled){border-color:var(--acc);color:var(--acc)}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  button.primary{background:var(--acc);color:#06201e;border-color:var(--acc)}
+  button.primary:hover:not(:disabled){filter:brightness(1.08);color:#06201e}
+  button.amber{background:var(--acc2);color:#2a1604;border-color:var(--acc2)}
+  button.amber:hover:not(:disabled){filter:brightness(1.08);color:#2a1604}
+  .btnrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+  .tabs{display:flex;gap:4px;margin-bottom:14px;border-bottom:1px solid var(--line)}
+  .tab{padding:8px 14px;border:none;border-bottom:2px solid transparent;
+       background:none;color:var(--mut);border-radius:0;font-weight:550}
+  .tab.active{color:var(--acc);border-bottom-color:var(--acc)}
+  .tab:hover{color:var(--ink)}
+  .panel{display:none}.panel.active{display:block}
+  canvas{max-width:100%;border-radius:8px;background:#000;display:block}
+  .stage{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  @media(max-width:660px){.stage{grid-template-columns:1fr}}
+  .stage .lbl{font-size:11.5px;color:var(--mut);margin-bottom:5px;
+              text-transform:uppercase;letter-spacing:.6px}
+  .log{font-family:var(--mono);font-size:11.5px;background:#0a0e13;
+       border:1px solid var(--line);border-radius:8px;padding:11px;
+       height:150px;overflow-y:auto;white-space:pre-wrap;color:#aeb9c7}
+  .log .ok{color:var(--good)}.log .er{color:var(--warn)}.log .hi{color:var(--acc2)}
+  .bar{height:6px;background:var(--panel2);border-radius:4px;overflow:hidden;
+       margin:10px 0 4px}
+  .bar > i{display:block;height:100%;width:0;background:var(--acc);transition:.15s}
+  .peaks{font-family:var(--mono);font-size:13px;margin-top:8px}
+  .peaks table{width:100%;border-collapse:collapse}
+  .peaks th{text-align:left;color:var(--mut);font-weight:500;font-size:11px;
+            padding:3px 8px;text-transform:uppercase;letter-spacing:.5px}
+  .peaks td{padding:3px 8px;border-top:1px solid var(--line)}
+  .peaks .fx{color:var(--acc)}.peaks .fy{color:var(--acc2)}
+  .hint{color:var(--mut);font-size:11.5px;margin-top:8px;line-height:1.45}
+  .status{font-size:12px;color:var(--mut);margin-top:10px}
+  .status b{color:var(--good)}
+  .pill{display:inline-block;font-family:var(--mono);font-size:11px;
+        padding:2px 7px;border-radius:20px;border:1px solid var(--line);
+        color:var(--mut)}
+  video{display:none}
+  .canvwrap{position:relative;display:inline-block}
+  #pickCanvas{cursor:crosshair}
+  details{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+  summary{cursor:pointer;color:var(--mut);font-size:12px;user-select:none}
+  a{color:var(--acc)}
+</style>
+</head>
+<body>
+<header>
+  <h1>EVM&nbsp;Web</h1>
+  <span class="sub">Eulerian Video Magnification — 微小な動きの増幅と卓越振動数解析</span>
+  <span class="ref">Wu et&nbsp;al., SIGGRAPH 2012 (MIT CSAIL) / ブラウザ完結版</span>
+</header>
+
+<main>
+  <div class="grid">
+    <!-- ============ LEFT: controls ============ -->
+    <div>
+      <div class="card">
+        <h2>入力動画</h2>
+        <label class="drop" id="drop">
+          <div class="big">動画をドロップ</div>
+          <div>またはクリックして選択（mp4 / webm / mov など）</div>
+          <input type="file" id="file" accept="video/*">
+        </label>
+        <div class="status" id="vidInfo">未読込</div>
+        <div class="bar"><i id="loadbar"></i></div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <h2>共通設定</h2>
+        <div class="row">
+          <label class="field"><span>fps（上書き / 0=メタ）</span>
+            <input type="number" id="fps" value="200" step="1" min="0"></label>
+          <label class="field"><span>最大フレーム数（0=全部）</span>
+            <input type="number" id="maxFrames" value="1200" step="1" min="0"></label>
+        </div>
+        <div class="row">
+          <label class="field"><span>フレーム間引き stride（1=間引きなし）</span>
+            <input type="number" id="stride" value="1" step="1" min="1"></label>
+          <label class="field"><span>処理解像度 長辺上限 px（0=原寸）</span>
+            <input type="number" id="procMax" value="640" step="16" min="0"></label>
+        </div>
+        <div class="row">
+          <label class="field"><span>読込開始 秒</span>
+            <input type="number" id="trimStart" value="0" step="0.5" min="0"></label>
+          <label class="field"><span>読込終了 秒（0=最後まで）</span>
+            <input type="number" id="trimEnd" value="0" step="0.5" min="0"></label>
+        </div>
+        <p class="hint">読み込みは動画を等倍再生しながら各フレームを取得します（シークしないので 6000fr でも実時間ベースで完了）。フレームは RGBA 生データで保持するため <b>幅×高さ×4 byte/枚</b>（640×480≈1.2MB、1920×1080≈8.3MB）。magnify は増幅後フレームも同量保持するので、フルHD 1200枚だと約 9.5GB×2 となりタブが落ちます。<b>長辺上限</b>で縮小（640 なら フルHD比 1/9）し、長尺は<b>読込区間</b>で必要な時間帯だけを切り出すか stride で間引いてください。読み込み前に必要メモリを自動見積もりし、大きすぎる場合は警告を出します。周波数分解能は Δf=1/T なので、卓越振動数を見るだけなら 10〜30 秒あれば十分です。</p>
+      </div>
+
+      <div class="card" id="magCard" style="margin-top:16px">
+        <h2>magnify 設定</h2>
+        <div class="row">
+          <label class="field"><span>バンドパス下限 Hz</span>
+            <input type="number" id="low" value="2" step="0.1"></label>
+          <label class="field"><span>バンドパス上限 Hz</span>
+            <input type="number" id="high" value="9" step="0.1"></label>
+        </div>
+        <div class="row">
+          <label class="field"><span>増幅率 α</span>
+            <input type="number" id="alpha" value="20" step="1"></label>
+          <label class="field"><span>ピラミッド段数 level</span>
+            <input type="number" id="level" value="3" step="1" min="0" max="6"></label>
+        </div>
+        <label class="field"><span>バターワース次数 order</span>
+          <input type="number" id="order" value="2" step="1" min="1" max="6"></label>
+      </div>
+
+      <div class="card" id="anaCard" style="margin-top:16px">
+        <h2>analyze 設定</h2>
+        <label class="chk"><input type="checkbox" id="autoRoi" checked>
+          <span>ArUco 自動検出で ROI 決定</span></label>
+        <span class="hint">ROI（クリックで枠の左上→右下を指定、または下に直接入力）</span>
+        <div class="roi-grid" style="margin-top:6px">
+          <input type="number" id="rx0" placeholder="X0">
+          <input type="number" id="ry0" placeholder="Y0">
+          <input type="number" id="rx1" placeholder="X1">
+          <input type="number" id="ry1" placeholder="Y1">
+        </div>
+        <div class="row" style="margin-top:6px">
+          <label class="field"><span>検出下限 fmin Hz</span>
+            <input type="number" id="fmin" value="0.5" step="0.1"></label>
+          <label class="field"><span>ピーク数 n_peaks</span>
+            <input type="number" id="npeaks" value="3" step="1" min="1"></label>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <h2>実行</h2>
+        <div class="btnrow">
+          <button class="primary" id="runMag" disabled>magnify</button>
+          <button class="amber"   id="runAna" disabled>analyze</button>
+          <button id="runBoth" disabled>both</button>
+        </div>
+        <div class="status" id="ocvStatus">OpenCV.js 読込中…</div>
+      </div>
+    </div>
+
+    <!-- ============ RIGHT: output ============ -->
+    <div>
+      <div class="tabs">
+        <button class="tab active" data-tab="preview">プレビュー / ROI</button>
+        <button class="tab" data-tab="magnify">magnify 出力</button>
+        <button class="tab" data-tab="analyze">analyze 結果</button>
+        <button class="tab" data-tab="orbit">点オービット</button>
+        <button class="tab" data-tab="mode">モード形状</button>
+        <button class="tab" data-tab="log">ログ</button>
+      </div>
+
+      <!-- preview -->
+      <div class="panel active" data-panel="preview">
+        <div class="card">
+          <h2>先頭フレーム — ドラッグで ROI を囲む</h2>
+          <div class="canvwrap"><canvas id="pickCanvas" width="640" height="480"></canvas></div>
+          <div class="btnrow" style="margin-top:8px">
+            <label class="chk"><input type="checkbox" id="pointMode"> 点モード（クリックで計測点を追加）</label>
+            <button id="clearPts">点を全消去</button>
+            <button id="zoomReset" disabled>拡大リセット</button>
+            <span class="hint" style="align-self:center">ズーム <b id="zoomLbl">×1.0</b></span>
+          </div>
+          <p class="hint">通常はドラッグで ROI を矩形選択します。<b>点モード</b>をオンにすると、クリックした位置に計測点を複数打てます（オービット解析用）。点を打ったら「点オービット」タブで周波数を選んで解析します。<br>
+          <b>拡大操作：</b>マウスホイールでカーソル位置を中心にズーム（最大 ×20）、<b>Shift＋ドラッグ</b>またはホイールボタンドラッグで表示範囲を移動、<b>ダブルクリック</b>で等倍に戻ります（点モード中はダブルクリック無効。「拡大リセット」ボタンを使用）。タッチはピンチで拡大・2本指で移動。座標はズームしても元画像の画素で記録されるため、細かい箇所も正確に選べます。</p>
+        </div>
+      </div>
+
+      <!-- magnify -->
+      <div class="panel" data-panel="magnify">
+        <div class="card">
+          <h2>増幅プレビュー</h2>
+          <div class="stage">
+            <div><div class="lbl">原画 (current frame)</div>
+                 <canvas id="origCanvas" width="320" height="240"></canvas></div>
+            <div><div class="lbl">増幅後 (magnified)</div>
+                 <canvas id="magCanvas" width="320" height="240"></canvas></div>
+          </div>
+          <div class="bar"><i id="magbar"></i></div>
+          <div class="btnrow">
+            <button id="playMag" disabled>▶ ループ再生</button>
+            <button id="dlMag" disabled>増幅動画を保存 (.webm)</button>
+          </div>
+          <label class="chk" style="margin-top:4px"><input type="checkbox" id="ovOrbit">
+            <span>オービットの動きを重畳（選定点の軌道＋現在位置）</span></label>
+          <p class="hint">増幅結果は全フレームをメモリに保持し、ループ再生します。保存はブラウザ対応の webm（VP8/VP9）です。<br>「オービットの動きを重畳」をオンにすると、<b>点オービット</b>タブで解析した各計測点の楕円軌道と、フレーム時刻に同期して軌道上を動くマーカーを増幅動画（再生・保存の両方）に描き込みます。倍率は点オービットタブの「倍率」を使います（先にオービット解析を実行してください）。</p>
+        </div>
+      </div>
+
+      <!-- analyze -->
+      <div class="panel" data-panel="analyze">
+        <div class="card">
+          <h2>FFT 振幅スペクトル</h2>
+          <canvas id="fftCanvas" width="820" height="300"></canvas>
+          <div class="peaks">
+            <table>
+              <thead><tr><th>順位</th><th>X 卓越 Hz</th><th>振幅</th><th>Y 卓越 Hz</th><th>振幅</th></tr></thead>
+              <tbody id="peakBody"></tbody>
+            </table>
+          </div>
+          <div class="btnrow" style="margin-top:12px">
+            <button id="dlCsv" disabled>変位時系列 CSV を保存</button>
+            <button id="dlFftCsv" disabled>FFT結果 CSV を保存</button>
+          </div>
+          <p class="hint" id="anaMeta"></p>
+
+          <div style="margin-top:16px;border-top:1px solid var(--line);padding-top:14px">
+            <h2 style="margin-bottom:8px">スペクトル増幅 — この帯域で動画生成（逆FFT）</h2>
+            <p class="hint" style="margin-top:0">上のスペクトルを見て増幅したい周波数帯を決めます。<b>グラフ上を左右にドラッグ</b>すると帯域を選択でき、ピーク候補からも設定できます。指定した帯域だけを FFT で抜き出し、増幅率 α 倍して逆FFTで動画に戻します（結果は「magnify 出力」タブでプレビュー／保存）。</p>
+            <div class="btnrow" style="align-items:center;margin-top:10px">
+              <label>ピーク候補
+                <select id="sbPeakSel" style="min-width:130px"><option value="">—</option></select>
+              </label>
+            </div>
+            <div class="row3" style="grid-template-columns:1fr 1fr 1fr 1fr;margin-top:10px">
+              <label class="field"><span>帯域下限 Hz</span>
+                <input type="number" id="sbLow" value="0.8" step="0.1" min="0"></label>
+              <label class="field"><span>帯域上限 Hz</span>
+                <input type="number" id="sbHigh" value="1.5" step="0.1" min="0"></label>
+              <label class="field"><span>増幅率 α</span>
+                <input type="number" id="sbAlpha" value="20" step="1"></label>
+              <label class="field"><span>ピラミッド段数</span>
+                <input type="number" id="sbLevel" value="3" step="1" min="0" max="6"></label>
+            </div>
+            <div class="btnrow">
+              <button class="primary" id="sbRun" disabled>この帯域で増幅動画を生成</button>
+            </div>
+            <p class="hint" id="sbMeta">※ 生成には OpenCV.js が必要です（ArUco自動ROIと同じ）。analyze を一度実行するとボタンが有効になります。</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- orbit -->
+      <div class="panel" data-panel="orbit">
+        <div class="card">
+          <h2>点オービット / ベクトル表示</h2>
+          <div class="btnrow" style="margin-bottom:8px;align-items:center;flex-wrap:wrap">
+            <label>周波数 (Hz)
+              <input type="number" id="orbFreq" value="1" step="0.1" min="0" style="width:80px">
+            </label>
+            <label>候補
+              <select id="orbPeakSel" style="min-width:120px"><option value="">—</option></select>
+            </label>
+            <label>倍率
+              <input type="number" id="orbScale" value="20" step="1" min="1" style="width:70px">
+            </label>
+            <label>表示
+              <select id="orbView">
+                <option value="ellipse" selected>楕円軌道（1周期）</option>
+                <option value="vector">同位相ベクトル（基準=点1）</option>
+              </select>
+            </label>
+            <button class="primary" id="runOrbit" disabled>オービット解析</button>
+            <button id="dlOrbitCsv" disabled>オービットCSV</button>
+          </div>
+          <div class="stage" style="grid-template-columns:1.4fr 1fr">
+            <div><div class="lbl">フレーム上に軌道を重畳（クリックで打った点）</div>
+                 <canvas id="orbitFrame" width="480" height="360"></canvas></div>
+            <div><div class="lbl">各点の拡大オービット</div>
+                 <canvas id="orbitZoom" width="320" height="360"></canvas></div>
+          </div>
+          <div class="peaks">
+            <table>
+              <thead><tr><th>点</th><th>座標(x,y)</th><th>周波数Hz</th><th>長軸(px)</th><th>短軸(px)</th><th>傾き°</th><th>回転</th></tr></thead>
+              <tbody id="orbBody"></tbody>
+            </table>
+          </div>
+          <p class="hint" id="orbMeta">プレビューで「点モード」をオンにして計測点をクリックで追加し、周波数を選んで「オービット解析」を押してください。矢印＝主振動方向、楕円＝1周期の軌道です。</p>
+        </div>
+      </div>
+
+      <!-- mode shape -->
+      <div class="panel" data-panel="mode">
+        <div class="card">
+          <h2>モード形状（ODS: 指定振動数の空間分布）</h2>
+          <div class="btnrow" style="margin-bottom:8px;align-items:center;flex-wrap:wrap">
+            <label>周波数 (Hz)
+              <input type="number" id="modeFreq" value="1" step="0.05" min="0" style="width:90px">
+            </label>
+            <label>ピーク候補
+              <select id="modePeakSel" style="min-width:130px"><option value="">—</option></select>
+            </label>
+            <label>縮小段数
+              <input type="number" id="modeLevel" value="2" step="1" min="0" max="5" style="width:60px">
+            </label>
+            <label>表示
+              <select id="modeDisp">
+                <option value="signed" selected>符号付き（同位相=赤/逆位相=青）</option>
+                <option value="amp">振幅のみ</option>
+                <option value="phase">位相マップ</option>
+              </select>
+            </label>
+            <label>しきい値%
+              <input type="number" id="modeThr" value="10" step="1" min="0" max="90" style="width:60px">
+            </label>
+            <label>表示倍率
+              <input type="range" id="modeGainSl" min="0" max="2" step="0.05" value="0" style="width:110px;vertical-align:middle">
+              <input type="number" id="modeGain" value="1" step="0.5" min="0.1" style="width:65px">
+            </label>
+            <button class="primary" id="modeRun" disabled>モード形状を計算</button>
+          </div>
+          <div class="canvwrap"><canvas id="modeCanvas" width="640" height="480"></canvas></div>
+          <div class="btnrow" style="margin-top:8px">
+            <button id="modePlay" disabled>▶ 1周期アニメ（スロー再生）</button>
+            <button id="modePng" disabled>画像を保存 (.png)</button>
+          </div>
+          <p class="hint" id="modeMeta">analyze 実行後、スペクトルのピーク周波数を選んで「モード形状を計算」を押してください。全画素の輝度時系列に Goertzel を適用し、指定振動数の振幅・位相の空間分布を描きます。<b>赤＝基準点と同位相、青＝逆位相</b>（腹と節、たわみの向きの反転が分かります）。位相基準は最大振幅の画素です。振幅が小さく見えにくい場合は<b>表示倍率</b>（スライダー=対数目盛 ×1〜×100）を上げてください。倍率を上げても計算結果は変わらず、色の濃さだけが変わります（上限で飽和）。輝度変化に基づく実稼働たわみ形状（ODS）の近似であり、エッジ（輝度勾配が大きい場所）ほど感度が高くなります。</p>
+        </div>
+      </div>
+
+      <!-- log -->
+      <div class="panel" data-panel="log">
+        <div class="card"><h2>ログ</h2><div class="log" id="log"></div></div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<video id="video" playsinline muted></video>
+
+<script>
+/* ============================================================
+   状態
+============================================================ */
+let CV_READY=false;
+let frames=[];          // ImageData(BGRA→ここではRGBA) の生 Uint8 配列群 {data,w,h}
+let firstFrameImg=null; // 先頭 ImageData
+let VW=640, VH=480;
+let magFrames=[];       // 増幅後 ImageData
+let lastDx=null,lastDy=null,lastFps=null;
+let lastFFT=null;   // {freq, magX, magY, peaksX, peaksY} FFT結果CSV用
+let roiClicks=[];
+let dragging=false, dragStart=null, dragCur=null;   // ドラッグ矩形ROI用
+let measurePts=[];      // 計測点 [{x,y}] （点モードでクリック追加）
+let lastOrbits=null;    // オービット解析結果
+
+/* --- プレビュー拡大ビュー（ホイールズーム / パン） --- */
+let pickView={scale:1, ox:0, oy:0};   // ox,oy = 表示左上の画像座標
+let pickBmp=null;                     // firstFrameImg のオフスクリーンキャッシュ
+let panning=false, panStart=null;     // Shift/中ボタンドラッグでパン
+const PICK_ZMAX=20;
+let pinchPrev=null;                   // タッチのピンチ状態 {dist, cx, cy}
+
+const $=id=>document.getElementById(id);
+const log=(m,c='')=>{const l=$('log');l.innerHTML+=`<span class="${c}">${m}</span>\n`;l.scrollTop=l.scrollHeight;};
+
+/* ============================================================
+   OpenCV ready — 複数CDNを順に試す
+============================================================ */
+const OCV_CDNS=[
+  "https://docs.opencv.org/4.10.0/opencv.js",
+  "https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js",
+  "https://unpkg.com/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js",
+  "https://cdn.jsdelivr.net/npm/opencv.js@1.2.1/opencv.js"
+];
+function loadOpenCV(idx=0){
+  if(idx>=OCV_CDNS.length){onOcvErr();return;}
+  const url=OCV_CDNS[idx];
+  $('ocvStatus').innerHTML=`OpenCV.js 読込中… <span class="pill">${idx+1}/${OCV_CDNS.length}</span>`;
+  const s=document.createElement('script');
+  s.async=true; s.src=url;
+  s.onload=()=>onOcvReady();
+  s.onerror=()=>{log(`OpenCV.js 取得失敗: ${url}`,'er');s.remove();loadOpenCV(idx+1);};
+  document.body.appendChild(s);
+}
+function onOcvReady(){
+  if(typeof cv==='undefined'){return;}
+  const ready=()=>{
+    CV_READY=true;
+    $('ocvStatus').innerHTML='OpenCV.js <b>準備完了</b>';
+    log('OpenCV.js 初期化完了','ok');
+    refreshButtons();
+  };
+  if(cv.Mat){ready();} else {cv['onRuntimeInitialized']=ready;}
+}
+function onOcvErr(){
+  $('ocvStatus').innerHTML='<span style="color:var(--warn)">OpenCV.js 読込失敗。動画の読み込みは可能ですが magnify / ArUco自動ROI は使えません</span>';
+  log('OpenCV.js を全CDNから取得できませんでした。社内プロキシ等でブロックされている可能性があります。','er');
+  log('→ 動画読み込みと「手動ROIでのanalyze」は OpenCV なしでも動作します。','hi');
+  refreshButtons();
+}
+function refreshButtons(){
+  const haveFrames=frames.length>0;
+  // analyze は手動ROIなら OpenCV 不要（ArUco自動検出のみ OpenCV が要る）
+  $('runAna').disabled=!haveFrames;
+  // magnify / both はピラミッド処理に OpenCV が必須
+  $('runMag').disabled=!(CV_READY&&haveFrames);
+  $('runBoth').disabled=!(CV_READY&&haveFrames);
+  // スペクトル増幅は analyze 済み(lastFFT) かつ OpenCV 必須
+  if($('sbRun')) $('sbRun').disabled=!(CV_READY&&haveFrames&&lastFFT);
+  // モード形状は純JSなのでフレームさえあれば可（周波数は手入力でも良い）
+  if($('modeRun')) $('modeRun').disabled=!haveFrames;
+}
+
+/* ============================================================
+   タブ
+============================================================ */
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(x=>x.classList.remove('active'));
+  t.classList.add('active');
+  document.querySelector(`.panel[data-panel="${t.dataset.tab}"]`).classList.add('active');
+});
+function showTab(name){document.querySelector(`.tab[data-tab="${name}"]`).click();}
+
+/* ============================================================
+   動画読み込み → 全フレーム展開
+============================================================ */
+$('file').onchange=e=>{const f=e.target.files[0]; if(f) loadVideoFile(f);};
+
+/* ドラッグ＆ドロップ */
+(function(){
+  const dz=$('drop');
+  const stop=e=>{e.preventDefault();e.stopPropagation();};
+  ['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{stop(e);dz.classList.add('over');}));
+  ['dragleave','dragend'].forEach(ev=>dz.addEventListener(ev,e=>{stop(e);
+    if(ev==='dragleave'&&dz.contains(e.relatedTarget))return; dz.classList.remove('over');}));
+  dz.addEventListener('drop',e=>{stop(e);dz.classList.remove('over');
+    const f=[...(e.dataTransfer.files||[])].find(x=>x.type.startsWith('video/'))||e.dataTransfer.files[0];
+    if(f) loadVideoFile(f); else log('動画ファイルが見つかりません','er');});
+  // ウィンドウ全体へのドロップでブラウザが動画を開いてしまうのを防止
+  ['dragover','drop'].forEach(ev=>window.addEventListener(ev,e=>{
+    if(!dz.contains(e.target)) e.preventDefault();}));
+})();
+
+async function loadVideoFile(f){
+  frames=[]; magFrames=[]; firstFrameImg=null; roiClicks=[];
+  dragging=false; dragStart=null; dragCur=null; lastFFT=null;
+  measurePts=[]; lastOrbits=null;
+  lastMode=null; if(typeof stopModeAnim==='function') stopModeAnim();
+  if($('modePlay')) $('modePlay').disabled=true;
+  if($('modePng')) $('modePng').disabled=true;
+  if($('dlOrbitCsv')) $('dlOrbitCsv').disabled=true;
+  if($('runOrbit')) $('runOrbit').disabled=true;
+  if($('dlFftCsv')) $('dlFftCsv').disabled=true;
+  $('vidInfo').textContent=`読込中… (${f.name})`;
+  $('loadbar').style.width='0';
+  log(`[load] ファイル受領: ${f.name} (${(f.size/1e6).toFixed(1)}MB)`,'');
+  const url=URL.createObjectURL(f);
+  const v=$('video');
+  // メタデータ待ち: ハンドラを src 設定の前に登録し、load() を明示。
+  // 既に読めている/取りこぼし対策に readyState チェックとタイムアウトも併用。
+  const metaOK=await new Promise(resolve=>{
+    let settled=false;
+    const fin=ok=>{if(settled)return;settled=true;
+      v.removeEventListener('loadedmetadata',h);v.removeEventListener('error',he);
+      clearTimeout(to);resolve(ok);};
+    const h =()=>fin(true);
+    const he=()=>fin(false);
+    const to=setTimeout(()=>{
+      // HAVE_METADATA 以上ならOK扱い、そうでなければ失敗
+      fin(v.readyState>=1);
+    },8000);
+    v.addEventListener('loadedmetadata',h);
+    v.addEventListener('error',he);
+    v.removeAttribute('src');
+    v.src=url;
+    v.load();                       // ← 明示ロードで loadedmetadata を確実に発火
+    if(v.readyState>=1) fin(true);   // 既にメタ取得済みならすぐ解決
+  });
+  if(!metaOK){
+    log('[load] 動画メタデータを読めませんでした（コーデック非対応の可能性）','er');
+    log('→ ブラウザ非対応コーデック（例: MPEG-4 Part2 / DivX / Xvid）の可能性が高いです。H.264(mp4) または VP9(webm) に変換してください。','hi');
+    log('   ffmpeg 例:  ffmpeg -i 入力.mp4 -c:v libx264 -pix_fmt yuv420p -an 出力.mp4','hi');
+    $('vidInfo').innerHTML='<span style="color:var(--warn)">読込失敗: ブラウザ非対応コーデックの可能性。H.264 mp4 に変換してください</span>';
+    URL.revokeObjectURL(url);
+    return;
+  }
+  VW=v.videoWidth; VH=v.videoHeight;
+  log(`[load] メタデータ取得: ${VW}x${VH} duration=${v.duration.toFixed(2)}s`,'');
+  // 処理解像度の長辺上限（drawImage で縮小されるので grab() 側の変更は不要）
+  const procCap=parseInt($('procMax').value)||0;
+  if(procCap>0 && Math.max(VW,VH)>procCap){
+    const s=procCap/Math.max(VW,VH);
+    const ow=VW, oh=VH;
+    VW=Math.max(2,Math.round(VW*s/2)*2);   // 偶数に丸め（pyrDown 安定用）
+    VH=Math.max(2,Math.round(VH*s/2)*2);
+    log(`[load] 処理解像度を縮小: ${ow}x${oh} → ${VW}x${VH}（約${(ow*oh/(VW*VH)).toFixed(1)}分の1のメモリ）`,'hi');
+  }
+  const estMB=VW*VH*4/1048576;
+
+  // --- 読込区間の決定（クランプ） ---
+  let trimS=Math.max(0,parseFloat($('trimStart').value)||0);
+  let trimE=parseFloat($('trimEnd').value)||0;
+  if(trimE<=0 || trimE>v.duration) trimE=v.duration;
+  if(trimS>=trimE){
+    log(`[load] 読込開始(${trimS}s)が終了(${trimE.toFixed(1)}s)以降のため 0s からに変更します`,'er');
+    trimS=0;
+  }
+  const spanSec=trimE-trimS;
+
+  // --- メモリ事前見積もり ---
+  const fpsGuess=parseFloat($('fps').value)||30;   // 見積もり用（未入力なら30と仮定）
+  const strideEst=Math.max(1,parseInt($('stride').value)||1);
+  const maxFEst=parseInt($('maxFrames').value)||0;
+  let estFrames=Math.floor(spanSec*fpsGuess/strideEst);
+  if(maxFEst>0) estFrames=Math.min(estFrames,maxFEst);
+  const estLoadGB=estFrames*VW*VH*4/1073741824;          // 読み込みのみ
+  const estTotalGB=estLoadGB*2;                          // magnify 実行時（増幅フレームも保持）
+  log(`[load] 見積もり: 区間 ${trimS.toFixed(1)}〜${trimE.toFixed(1)}s / 約${estFrames}枚 / `
+     +`読み込み ${estLoadGB.toFixed(2)}GB（magnify 実行時 計${estTotalGB.toFixed(2)}GB）`, estTotalGB>2?'er':'');
+
+  // --- 危険水準なら警告して確認（既定閾値: magnify込みで 2GB） ---
+  if(estTotalGB>2){
+    // 対策の目安を計算して提示
+    const okFrames=Math.floor(1*1073741824/(VW*VH*4));   // 読み込み1GBに収まる枚数
+    const sugSec=Math.max(5,Math.floor(okFrames*strideEst/fpsGuess));
+    const sugStride=Math.ceil(estFrames/okFrames)*strideEst;
+    const msg=
+`メモリ使用量が大きく、ブラウザのタブが落ちる可能性があります。
+
+見積もり: 約${estFrames}枚 / ${VW}×${VH}
+  読み込みのみ : ${estLoadGB.toFixed(2)} GB
+  magnify実行時: ${estTotalGB.toFixed(2)} GB（増幅フレームも保持するため2倍）
+
+対策の目安（いずれか）:
+ ・読込区間を ${sugSec} 秒以下にする（現在 ${spanSec.toFixed(1)} 秒）
+ ・stride を ${sugStride} 以上にする（実効fpsが下がる点に注意）
+ ・処理解像度 長辺上限を下げる（現在 ${procCap||'原寸'}）
+
+このまま読み込みを続けますか？
+（OK=続行 / キャンセル=中止して設定を変更）`;
+    if(!window.confirm(msg)){
+      log('[load] 見積もり警告により読み込みを中止しました。設定を変更して再度お試しください。','hi');
+      $('vidInfo').innerHTML='<span style="color:var(--warn)">読み込み中止（メモリ見積もり超過）。区間・stride・解像度を調整してください</span>';
+      $('loadbar').style.width='0';
+      URL.revokeObjectURL(url);
+      refreshButtons();
+      return;
+    }
+    log('[load] 警告を確認のうえ続行します','er');
+  }
+
+  // fps欄に値があればメタ推定は不要（推定の再生待ちでハングするのを避ける）
+  const fpsField=parseFloat($('fps').value);
+  let metaFps;
+  if(fpsField>0){
+    metaFps=fpsField;
+    log(`動画: ${f.name}  ${VW}x${VH}  duration=${v.duration.toFixed(2)}s  fps=${fpsField}（手入力を使用）`);
+  }else{
+    metaFps=await guessFps(v);
+    log(`動画: ${f.name}  ${VW}x${VH}  duration=${v.duration.toFixed(2)}s  meta-fps≈${metaFps}`);
+  }
+  await extractFrames(v,metaFps,trimS,trimE);
+  URL.revokeObjectURL(url);
+  refreshButtons();
+}
+
+/* fps推定: 再生して数フレーム計測。ただし自動再生ブロック等で
+   止まらないよう 4秒タイムアウトで打ち切り 30 を返す。 */
+async function guessFps(v){
+  if(!('requestVideoFrameCallback' in HTMLVideoElement.prototype)) return 30;
+  return await new Promise(res=>{
+    let times=[],last=null,cnt=0,done=false;
+    const finish=val=>{if(done)return;done=true;try{v.pause();v.currentTime=0;}catch(e){}res(val);};
+    const to=setTimeout(()=>{
+      const d=times.filter(x=>x>0).sort((a,b)=>a-b);
+      const med=d.length?d[Math.floor(d.length/2)]:0;
+      log('[load] fps推定タイムアウト → 既定値で続行','er');
+      finish(med>0?Math.round(1/med):30);
+    },4000);
+    v.muted=true;
+    v.play().catch(()=>{clearTimeout(to);finish(30);});
+    const cb=(now,meta)=>{
+      if(done)return;
+      if(last!==null) times.push(meta.mediaTime-last);
+      last=meta.mediaTime; cnt++;
+      if(cnt<8){v.requestVideoFrameCallback(cb);}
+      else{clearTimeout(to);
+        const d=times.filter(x=>x>0).sort((a,b)=>a-b);
+        const med=d.length?d[Math.floor(d.length/2)]:1/30;
+        finish(med>0?Math.round(1/med):30);}
+    };
+    v.requestVideoFrameCallback(cb);
+  });
+}
+
+/* フレーム展開:
+   既定は「等倍再生しながら requestVideoFrameCallback で出てくるフレームを拾う」方式。
+   1フレームごとの seek 往復を避けるため 6000fr でも実時間ベースで終わる。
+   stride>1 で間引き、maxF で上限。rVFC 非対応ブラウザは seek 方式にフォールバック。*/
+async function extractFrames(v,metaFps,trimS=0,trimE=0){
+  const fpsIn=parseFloat($('fps').value)||metaFps||30;
+  const maxF=parseInt($('maxFrames').value)||0;
+  const stride=Math.max(1,parseInt($('stride').value)||1);
+  if(!trimE || trimE>v.duration) trimE=v.duration;
+  const cv2=document.createElement('canvas');
+  cv2.width=VW; cv2.height=VH;
+  const ctx=cv2.getContext('2d',{willReadFrequently:true});
+
+  const grab=()=>{ctx.drawImage(v,0,0,VW,VH);return ctx.getImageData(0,0,VW,VH);};
+  const onGot=(img,shownIdx)=>{
+    frames.push(img);
+    if(frames.length===1){firstFrameImg=img;drawPick();}
+    if(frames.length%20===0){
+      $('loadbar').style.width=`${maxF?100*frames.length/maxF:Math.min(99,100*(v.currentTime-trimS)/(trimE-trimS))}%`;
+      $('vidInfo').textContent=`展開中 ${frames.length} frames（${v.currentTime.toFixed(1)}s / ${trimE.toFixed(1)}s）…`;
+    }
+  };
+
+  const hasRVFC=('requestVideoFrameCallback' in HTMLVideoElement.prototype);
+  if(hasRVFC){
+    log(`[load] 再生ベース展開（区間 ${trimS.toFixed(1)}〜${trimE.toFixed(1)}s, stride=${stride}, 上限=${maxF||'なし'}）`,'');
+    const r=await new Promise(resolve=>{
+      let seen=0,settled=false;
+      const finish=val=>{if(settled)return;settled=true;clearInterval(watch);
+        try{v.pause();}catch(e){}resolve(val);};
+      v.muted=true; v.playbackRate=1;
+      // 進捗ウォッチドッグ: 一定時間フレームが増えなければ seek にフォールバック
+      let lastSeen=0,stall=0;
+      const watch=setInterval(()=>{
+        if(seen===lastSeen){
+          stall++;
+          if(stall>=3){ // 約3秒フレームが来ない＝再生が進んでいない
+            log('[load] 再生が進みません → seek 方式にフォールバック','er');
+            finish('fallback');
+          }
+        }else{stall=0;lastSeen=seen;}
+      },1000);
+      const cb=(now,meta)=>{
+        if(settled)return;
+        const t=meta?meta.mediaTime:v.currentTime;
+        if(t>=trimE){finish('done');return;}          // 終了秒に到達
+        if(t>=trimS){                                  // 区間内のみ取得
+          if(seen%stride===0) onGot(grab(),seen);
+          seen++;
+        }
+        const enough=(maxF && frames.length>=maxF);
+        if(enough || v.ended){finish('done');return;}
+        v.requestVideoFrameCallback(cb);
+      };
+      v.requestVideoFrameCallback(cb);
+      v.onended=()=>{ if(!settled && !(maxF&&frames.length>=maxF)) finish('done'); };
+      v.currentTime=trimS;                             // 開始秒から再生
+      v.play().catch(()=>{
+        log('[load] 自動再生不可 → seek 方式にフォールバック','er');
+        finish('fallback');
+      });
+    });
+    if(r==='fallback'){frames=[];firstFrameImg=null;await extractBySeek(v,fpsIn,maxF,stride,ctx,trimS,trimE);}
+  } else {
+    log('[load] requestVideoFrameCallback 非対応 → seek 方式','er');
+    await extractBySeek(v,fpsIn,maxF,stride,ctx,trimS,trimE);
+  }
+
+  $('loadbar').style.width='100%';
+  $('vidInfo').innerHTML=`<b>${frames.length}</b> frames / ${VW}×${VH} / fps=${fpsIn}`
+    + (trimS>0||trimE<v.duration ? ` / 区間 ${trimS.toFixed(1)}–${trimE.toFixed(1)}s`:'')
+    + (stride>1?` / 間引き×${stride}（実効fps≈${(fpsIn/stride).toFixed(1)}）`:'');
+  log(`フレーム展開完了: ${frames.length} 枚`,'ok');
+  if($('runOrbit')) $('runOrbit').disabled=false;
+  if(stride>1) log(`※ 間引き×${stride} のため analyze の実効サンプリングは ${(fpsIn/stride).toFixed(1)}fps 相当。fps欄もこの値に合わせると振動数が正しく出ます。`,'hi');
+}
+
+/* フォールバック: 旧来の seek 方式（rVFC が無い/再生不可のとき） */
+async function extractBySeek(v,fpsIn,maxF,stride,ctx,trimS=0,trimE=0){
+  if(!trimE || trimE>v.duration) trimE=v.duration;
+  const dt=stride/fpsIn;
+  let total=Math.floor((trimE-trimS)*fpsIn/stride);
+  if(maxF>0) total=Math.min(maxF,total);
+  v.pause();
+  for(let i=0;i<total;i++){
+    const t=trimS+i*dt; if(t>=trimE || t>=v.duration) break;
+    await seek(v,t);
+    ctx.drawImage(v,0,0,VW,VH);
+    const img=ctx.getImageData(0,0,VW,VH);
+    frames.push(img);
+    if(i===0){firstFrameImg=img;drawPick();}
+    if(i%20===0){$('loadbar').style.width=`${100*i/total}%`;
+      $('vidInfo').textContent=`展開中(seek) ${i}/${total}…`;
+      await new Promise(r=>setTimeout(r,0));}
+  }
+}
+function seek(v,t){return new Promise(res=>{
+  const h=()=>{v.removeEventListener('seeked',h);res();};
+  v.addEventListener('seeked',h); v.currentTime=t;});}
+
+/* ============================================================
+   先頭フレーム描画 + ROIクリック
+============================================================ */
+function drawPick(){
+  const c=$('pickCanvas'); c.width=VW; c.height=VH;
+  // firstFrameImg をオフスクリーンにキャッシュ（変換付き drawImage 用）
+  pickBmp=document.createElement('canvas'); pickBmp.width=VW; pickBmp.height=VH;
+  pickBmp.getContext('2d').putImageData(firstFrameImg,0,0);
+  pickView={scale:1, ox:0, oy:0};
+  updateZoomLabel();
+  redrawPick();
+}
+/* ---- ビュー変換ヘルパ ---- */
+function clampView(){
+  const v=pickView;
+  v.scale=Math.max(1,Math.min(PICK_ZMAX,v.scale));
+  const vw=VW/v.scale, vh=VH/v.scale;          // 表示中の画像範囲
+  v.ox=Math.max(0,Math.min(VW-vw,v.ox));
+  v.oy=Math.max(0,Math.min(VH-vh,v.oy));
+}
+function updateZoomLabel(){
+  const el=$('zoomLbl');
+  if(el) el.textContent=`×${pickView.scale.toFixed(1)}`;
+  const rb=$('zoomReset'); if(rb) rb.disabled=(pickView.scale<=1);
+}
+/* クライアント座標 → canvas 画素座標（変換前） */
+function canvasPx(e){
+  const c=$('pickCanvas'), r=c.getBoundingClientRect();
+  const src=(e.touches&&e.touches[0])?e.touches[0]:
+            (e.changedTouches&&e.changedTouches[0])?e.changedTouches[0]:e;
+  return [(src.clientX-r.left)*c.width/r.width,
+          (src.clientY-r.top)*c.height/r.height];
+}
+/* ---- ROI 指定: マウスドラッグで矩形を囲む（主）＋ 2点クリック（副） ---- */
+/* クライアント座標 → 元画像座標（ズーム/パンの逆変換込み） */
+function canvasXY(e){
+  const [cx,cy]=canvasPx(e);
+  const x=Math.round(pickView.ox+cx/pickView.scale);
+  const y=Math.round(pickView.oy+cy/pickView.scale);
+  return [Math.max(0,Math.min(VW,x)), Math.max(0,Math.min(VH,y))];
+}
+/* 指定した canvas 画素位置を中心にズーム */
+function zoomPickAt(cx,cy,factor){
+  const v=pickView;
+  const ix=v.ox+cx/v.scale, iy=v.oy+cy/v.scale;  // カーソル下の画像座標
+  const ns=Math.max(1,Math.min(PICK_ZMAX,v.scale*factor));
+  if(ns===v.scale) return;
+  v.scale=ns;
+  v.ox=ix-cx/ns; v.oy=iy-cy/ns;                  // 同じ画像点がカーソル下に残るよう補正
+  clampView(); updateZoomLabel(); redrawPick();
+}
+function resetPickView(){
+  pickView={scale:1, ox:0, oy:0};
+  updateZoomLabel(); redrawPick();
+}
+function beginDrag(e){
+  if(!firstFrameImg) return;
+  e.preventDefault();
+  // パン：Shift+ドラッグ or ホイールボタンドラッグ（ズーム中の移動用）
+  if(e.shiftKey || e.button===1){
+    panning=true;
+    panStart={px:canvasPx(e), ox:pickView.ox, oy:pickView.oy};
+    return;
+  }
+  // 点モード：クリック位置に計測点を追加してドラッグ処理はしない
+  if($('pointMode') && $('pointMode').checked){
+    const [px,py]=canvasXY(e);
+    // ダブルクリック等による同一箇所への誤った二重追加を防止
+    const now=performance.now(), lp=measurePts[measurePts.length-1];
+    if(lp && now-(lp._t||0)<300 && Math.hypot(px-lp.x,py-lp.y)<4) return;
+    measurePts.push({x:px,y:py,_t:now});
+    log(`[点] #${measurePts.length} 追加 (${px},${py})　※ズーム ×${pickView.scale.toFixed(1)}`,'');
+    redrawPick();
+    return;
+  }
+  dragging=true; dragStart=canvasXY(e); dragCur=dragStart; roiClicks=[];
+  redrawPick();
+}
+function moveDrag(e){
+  if(panning){
+    e.preventDefault();
+    const [cx,cy]=canvasPx(e);
+    pickView.ox=panStart.ox-(cx-panStart.px[0])/pickView.scale;
+    pickView.oy=panStart.oy-(cy-panStart.px[1])/pickView.scale;
+    clampView(); redrawPick();
+    return;
+  }
+  if(!dragging) return;
+  e.preventDefault();
+  dragCur=canvasXY(e);
+  redrawPick();
+}
+function endDrag(e){
+  if(panning){panning=false; panStart=null; return;}
+  if(!dragging) return;
+  e.preventDefault();
+  dragging=false;
+  const [ax,ay]=dragStart, [bx,by]=dragCur;
+  const x0=Math.min(ax,bx), y0=Math.min(ay,by), x1=Math.max(ax,bx), y1=Math.max(ay,by);
+  // クリックだけ（ドラッグ距離ほぼ0）の場合は 2点クリック方式にフォールバック
+  if(Math.abs(x1-x0)<4 && Math.abs(y1-y0)<4){
+    roiClicks.push([ax,ay]);
+    if(roiClicks.length>2) roiClicks=[[ax,ay]];
+    if(roiClicks.length===2){
+      let[[cax,cay],[cbx,cby]]=roiClicks;
+      $('rx0').value=Math.min(cax,cbx); $('ry0').value=Math.min(cay,cby);
+      $('rx1').value=Math.max(cax,cbx); $('ry1').value=Math.max(cay,cby);
+      $('autoRoi').checked=false;
+      log(`[ROI] 2点クリック指定 (${$('rx0').value},${$('ry0').value})-(${$('rx1').value},${$('ry1').value})`,'');
+    }
+  }else{
+    $('rx0').value=x0; $('ry0').value=y0; $('rx1').value=x1; $('ry1').value=y1;
+    $('autoRoi').checked=false;
+    log(`[ROI] ドラッグ矩形指定 (${x0},${y0})-(${x1},${y1})  size ${x1-x0}x${y1-y0}px`,'');
+  }
+  dragStart=dragCur=null;
+  redrawPick();
+}
+const _pc=$('pickCanvas');
+_pc.addEventListener('mousedown',beginDrag);
+_pc.addEventListener('mousemove',moveDrag);
+window.addEventListener('mouseup',endDrag);
+// ホイールでカーソル位置を中心にズーム
+_pc.addEventListener('wheel',e=>{
+  if(!firstFrameImg) return;
+  e.preventDefault();
+  const [cx,cy]=canvasPx(e);
+  zoomPickAt(cx,cy, e.deltaY<0 ? 1.25 : 1/1.25);
+},{passive:false});
+// ダブルクリックで等倍に戻す（点モード中はクリック＝点追加のため無効。ボタンで戻す）
+_pc.addEventListener('dblclick',e=>{
+  e.preventDefault();
+  if($('pointMode') && $('pointMode').checked) return;
+  resetPickView();
+});
+// タッチ：1本指=従来動作 / 2本指=ピンチズーム＋パン
+function pinchState(e){
+  const r=_pc.getBoundingClientRect(), sx=_pc.width/r.width, sy=_pc.height/r.height;
+  const t0=e.touches[0], t1=e.touches[1];
+  return {dist:Math.hypot(t1.clientX-t0.clientX, t1.clientY-t0.clientY),
+          cx:((t0.clientX+t1.clientX)/2-r.left)*sx,
+          cy:((t0.clientY+t1.clientY)/2-r.top)*sy};
+}
+_pc.addEventListener('touchstart',e=>{
+  if(e.touches.length===2){e.preventDefault(); dragging=false; pinchPrev=pinchState(e); return;}
+  beginDrag(e);
+},{passive:false});
+_pc.addEventListener('touchmove',e=>{
+  if(e.touches.length===2 && pinchPrev){
+    e.preventDefault();
+    const cur=pinchState(e);
+    zoomPickAt(cur.cx,cur.cy, cur.dist/Math.max(pinchPrev.dist,1));
+    pickView.ox-=(cur.cx-pinchPrev.cx)/pickView.scale;
+    pickView.oy-=(cur.cy-pinchPrev.cy)/pickView.scale;
+    clampView(); redrawPick();
+    pinchPrev=cur;
+    return;
+  }
+  moveDrag(e);
+},{passive:false});
+_pc.addEventListener('touchend',e=>{
+  if(pinchPrev && e.touches.length<2){pinchPrev=null; return;}
+  endDrag(e);
+},{passive:false});
+if($('zoomReset')) $('zoomReset').onclick=resetPickView;
+
+function redrawPick(){
+  const c=$('pickCanvas'), ctx=c.getContext('2d');
+  if(!pickBmp){                       // 念のためのフォールバック
+    if(firstFrameImg){ctx.putImageData(firstFrameImg,0,0);}
+    return;
+  }
+  const s=pickView.scale, ox=pickView.ox, oy=pickView.oy;
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,c.width,c.height);
+  // ビュー変換：画像座標系で描けばズーム/パンに追従する
+  ctx.setTransform(s,0,0,s,-ox*s,-oy*s);
+  ctx.imageSmoothingEnabled = s<3;    // 高倍率ではピクセルをくっきり表示（正確に点を打てる）
+  ctx.drawImage(pickBmp,0,0);
+  // ドラッグ中の一時矩形
+  if(dragging && dragStart && dragCur){
+    const [ax,ay]=dragStart,[bx,by]=dragCur;
+    ctx.save();
+    ctx.fillStyle='rgba(63,208,201,.15)';
+    ctx.fillRect(Math.min(ax,bx),Math.min(ay,by),Math.abs(bx-ax),Math.abs(by-ay));
+    ctx.strokeStyle='#3fd0c9'; ctx.lineWidth=1.5/s; ctx.setLineDash([5/s,3/s]);
+    ctx.strokeRect(Math.min(ax,bx),Math.min(ay,by),Math.abs(bx-ax),Math.abs(by-ay));
+    ctx.restore();
+  }
+  // 確定済みROI
+  ctx.strokeStyle='#3fd0c9'; ctx.lineWidth=2/s;
+  if($('rx0').value!==''&&$('rx1').value!==''){
+    const x0=+$('rx0').value,y0=+$('ry0').value,x1=+$('rx1').value,y1=+$('ry1').value;
+    ctx.strokeRect(x0,y0,x1-x0,y1-y0);
+  }
+  ctx.fillStyle='#f2a65a';
+  roiClicks.forEach(([x,y])=>{ctx.beginPath();ctx.arc(x,y,4/s,0,7);ctx.fill();});
+  // 計測点（点モード）— 十字・ラベルは画面上のサイズを一定に保つ
+  measurePts.forEach((p,i)=>{
+    const L=7/s;
+    ctx.strokeStyle='#e5534b'; ctx.lineWidth=2/s; ctx.beginPath();
+    ctx.moveTo(p.x-L,p.y);ctx.lineTo(p.x+L,p.y);ctx.moveTo(p.x,p.y-L);ctx.lineTo(p.x,p.y+L);ctx.stroke();
+    ctx.fillStyle='#e5534b'; ctx.font=`${12/s}px monospace`;
+    ctx.fillText('#'+(i+1), p.x+8/s, p.y-6/s);
+  });
+  ctx.setTransform(1,0,0,1,0,0);
+}
+['rx0','ry0','rx1','ry1'].forEach(id=>$(id).oninput=redrawPick);
+if($('clearPts')) $('clearPts').onclick=()=>{measurePts=[];redrawPick();log('[点] 全消去','');};
+
+/* ============================================================
+   信号処理ヘルパ（Butterworth bandpass, FFT）
+============================================================ */
+// --- Butterworth band-pass 係数（bilinear, biquad cascade）---
+// order は per-section の2次に丸めて段数化。filtfilt で零位相。
+function butterBandpass(low,high,fps,order){
+  // RBJ ではなく、bilinear で素直に作る簡易実装：
+  // analog prototype → bandpass 変換は重いので、ここでは
+  // 2次バンドパス biquad を (order) 段カスケードして近似する。
+  const nyq=0.5*fps;
+  const f0=Math.sqrt(low*high);          // 中心周波数
+  const bw=(high-low);                   // 帯域幅
+  const w0=2*Math.PI*f0/fps;
+  const Q=f0/Math.max(bw,1e-6);
+  const alpha=Math.sin(w0)/(2*Q);
+  const cosw=Math.cos(w0);
+  // RBJ band-pass (constant skirt gain, peak gain = Q)
+  let b0=alpha, b1=0, b2=-alpha,
+      a0=1+alpha, a1=-2*cosw, a2=1-alpha;
+  b0/=a0; b1/=a0; b2/=a0; a1/=a0; a2/=a0;
+  const sec={b:[b0,b1,b2],a:[1,a1,a2]};
+  const sections=[]; for(let i=0;i<Math.max(1,order);i++) sections.push(sec);
+  return sections;
+}
+function applyBiquad(x,sec){
+  const{b,a}=sec; const y=new Float32Array(x.length);
+  let x1=0,x2=0,y1=0,y2=0;
+  for(let n=0;n<x.length;n++){
+    const xn=x[n];
+    const yn=b[0]*xn+b[1]*x1+b[2]*x2-a[1]*y1-a[2]*y2;
+    x2=x1;x1=xn;y2=y1;y1=yn;y[n]=yn;
+  }
+  return y;
+}
+function filtfiltSections(x,sections){
+  let y=x;
+  for(const s of sections){
+    y=applyBiquad(y,s);
+    y=Float32Array.from(y).reverse();
+    y=applyBiquad(y,s);
+    y=Float32Array.from(y).reverse();
+  }
+  return y;
+}
+
+// --- FFT (iterative radix-2, zero-padded) ---
+function fftMag(re){
+  let n=1; while(n<re.length) n<<=1;
+  const R=new Float64Array(n), I=new Float64Array(n);
+  for(let i=0;i<re.length;i++) R[i]=re[i];
+  // bit reversal
+  for(let i=1,j=0;i<n;i++){
+    let bit=n>>1;
+    for(;j&bit;bit>>=1) j^=bit;
+    j^=bit;
+    if(i<j){[R[i],R[j]]=[R[j],R[i]];[I[i],I[j]]=[I[j],I[i]];}
+  }
+  for(let len=2;len<=n;len<<=1){
+    const ang=-2*Math.PI/len;
+    const wR=Math.cos(ang),wI=Math.sin(ang);
+    for(let i=0;i<n;i+=len){
+      let cR=1,cI=0;
+      for(let k=0;k<len/2;k++){
+        const uR=R[i+k],uI=I[i+k];
+        const vR=R[i+k+len/2]*cR-I[i+k+len/2]*cI;
+        const vI=R[i+k+len/2]*cI+I[i+k+len/2]*cR;
+        R[i+k]=uR+vR; I[i+k]=uI+vI;
+        R[i+k+len/2]=uR-vR; I[i+k+len/2]=uI-vI;
+        const nR=cR*wR-cI*wI; cI=cR*wI+cI*wR; cR=nR;
+      }
+    }
+  }
+  const half=n/2;
+  const mag=new Float64Array(half);
+  for(let i=0;i<half;i++) mag[i]=Math.hypot(R[i],I[i]);
+  return {mag,nfft:n};
+}
+function fftPeaks(sig,fps,nPeaks,fmin){
+  const N=sig.length;
+  const mean=sig.reduce((s,v)=>s+v,0)/N;
+  const win=new Float64Array(N);
+  for(let i=0;i<N;i++) win[i]=(sig[i]-mean)*(0.5-0.5*Math.cos(2*Math.PI*i/(N-1)));
+  const {mag,nfft}=fftMag(win);
+  const freq=new Float64Array(mag.length);
+  for(let i=0;i<mag.length;i++) freq[i]=i*fps/nfft;
+  // ピーク検出（fmin以上）
+  const peaks=[];
+  for(let i=1;i<mag.length-1;i++){
+    if(freq[i]<fmin) continue;
+    if(mag[i]>mag[i-1]&&mag[i]>=mag[i+1]) peaks.push([freq[i],mag[i]]);
+  }
+  peaks.sort((a,b)=>b[1]-a[1]);
+  return {freq,mag,peaks:peaks.slice(0,nPeaks)};
+}
+
+// --- 複素FFT / 逆FFT（in-place, radix-2）---
+// inverse=true で逆変換（1/N スケール込み）。re,im は長さ n（2の冪）。
+function fftComplex(re,im,inverse){
+  const n=re.length;
+  for(let i=1,j=0;i<n;i++){
+    let bit=n>>1;
+    for(;j&bit;bit>>=1) j^=bit;
+    j^=bit;
+    if(i<j){const tr=re[i];re[i]=re[j];re[j]=tr;const ti=im[i];im[i]=im[j];im[j]=ti;}
+  }
+  for(let len=2;len<=n;len<<=1){
+    const ang=(inverse?2:-2)*Math.PI/len;
+    const wR=Math.cos(ang),wI=Math.sin(ang);
+    for(let i=0;i<n;i+=len){
+      let cR=1,cI=0;
+      for(let k=0;k<len/2;k++){
+        const uR=re[i+k],uI=im[i+k];
+        const vR=re[i+k+len/2]*cR-im[i+k+len/2]*cI;
+        const vI=re[i+k+len/2]*cI+im[i+k+len/2]*cR;
+        re[i+k]=uR+vR; im[i+k]=uI+vI;
+        re[i+k+len/2]=uR-vR; im[i+k+len/2]=uI-vI;
+        const nR=cR*wR-cI*wI; cI=cR*wI+cI*wR; cR=nR;
+      }
+    }
+  }
+  if(inverse){ for(let i=0;i<n;i++){re[i]/=n; im[i]/=n;} }
+}
+// 帯域選択マスク（矩形＋レイズドコサインの遷移帯 tw でリンギング抑制）
+function bandGain(f,flo,fhi,tw){
+  if(f>=flo && f<=fhi) return 1;
+  if(tw>0 && f>flo-tw && f<flo) return 0.5-0.5*Math.cos(Math.PI*(f-(flo-tw))/tw);
+  if(tw>0 && f>fhi    && f<fhi+tw) return 0.5+0.5*Math.cos(Math.PI*(f-fhi)/tw);
+  return 0;
+}
+
+/* ============================================================
+   点オービット / ベクトル表示
+   指定周波数における各計測点のX/Y変位の振幅・位相を Goertzel で求め、
+   1周期分の楕円軌道（リサージュ）と主振動方向を描く
+============================================================ */
+// 点周辺の小窓（半径 rad）の重心変位を全フレーム追跡
+function trackPoint(cx,cy,rad){
+  const x0=Math.max(0,cx-rad|0), y0=Math.max(0,cy-rad|0);
+  const x1=Math.min(VW,cx+rad|0), y1=Math.min(VH,cy+rad|0);
+  const xs=[],ys=[];
+  for(const img of frames){
+    let sw=0,sx=0,sy=0;
+    const d=img.data,W=img.width;
+    for(let y=y0;y<y1;y++)for(let x=x0;x<x1;x++){
+      const idx=(y*W+x)*4;
+      const g=0.299*d[idx]+0.587*d[idx+1]+0.114*d[idx+2];
+      const w=255-g;              // 暗い特徴を重み付け（trackCentroidと同方針）
+      sw+=w; sx+=w*x; sy+=w*y;
+    }
+    if(sw<1e-6){xs.push(xs.length?xs[xs.length-1]:cx);ys.push(ys.length?ys[ys.length-1]:cy);}
+    else{xs.push(sx/sw);ys.push(sy/sw);}
+  }
+  const mx=xs.reduce((s,v)=>s+v,0)/xs.length, my=ys.reduce((s,v)=>s+v,0)/ys.length;
+  return [xs.map(v=>v-mx), ys.map(v=>v-my)];
+}
+// Goertzel：信号 sig の周波数 f における複素成分（振幅A・位相φ）
+function goertzel(sig,fps,f){
+  const N=sig.length;
+  const mean=sig.reduce((s,v)=>s+v,0)/N;
+  const k=2*Math.PI*f/fps;
+  const cw=Math.cos(k), sw=Math.sin(k), coeff=2*cw;
+  let s0=0,s1=0,s2=0;
+  for(let n=0;n<N;n++){
+    const win=0.5-0.5*Math.cos(2*Math.PI*n/(N-1)); // Hann
+    s0=coeff*s1-s2+(sig[n]-mean)*win;
+    s2=s1; s1=s0;
+  }
+  const re=s1-s2*cw, im=s2*sw;
+  // 窓補正（Hannのコヒーレントゲイン 0.5）：振幅= 2/N * |.| / 0.5
+  const amp=2*Math.hypot(re,im)/N/0.5;
+  const phase=Math.atan2(im,re);
+  return {amp,phase};
+}
+// 楕円パラメータ（長軸・短軸・傾き・回転向き）を X,Y の振幅位相から求める
+function orbitParams(Ax,px,Ay,py){
+  // x(t)=Ax cos(wt+px), y(t)=Ay cos(wt+py)
+  // 1周期をサンプルして楕円を作り、主成分で長短軸・傾きを出す
+  const M=64, pts=[];
+  for(let i=0;i<M;i++){
+    const wt=2*Math.PI*i/M;
+    pts.push([Ax*Math.cos(wt+px), Ay*Math.cos(wt+py)]);
+  }
+  // 共分散行列→固有値分解（2x2）
+  let sxx=0,syy=0,sxy=0;
+  pts.forEach(([x,y])=>{sxx+=x*x;syy+=y*y;sxy+=x*y;});
+  sxx/=M;syy/=M;sxy/=M;
+  const tr=sxx+syy, det=sxx*syy-sxy*sxy;
+  const disc=Math.sqrt(Math.max(0,tr*tr/4-det));
+  const l1=tr/2+disc, l2=tr/2-disc;      // 分散（固有値, RMS^2）
+  // ピーク振幅基準に変換（正弦のRMS→ピークは ×√2）。長軸=ピーク変位[px]
+  const major=Math.sqrt(2)*Math.sqrt(Math.max(0,l1));
+  const minor=Math.sqrt(2)*Math.sqrt(Math.max(0,l2));
+  // 長軸方向角
+  let theta=0.5*Math.atan2(2*sxy, sxx-syy);
+  // 回転向き（外積の符号: x*y' - y*x' の1周期平均）
+  let cross=0;
+  for(let i=0;i<M;i++){
+    const [x,y]=pts[i], [x2,y2]=pts[(i+1)%M];
+    cross+=x*y2-y*x2;
+  }
+  const dirn = cross>0 ? 'CCW(反時計)' : (cross<0?'CW(時計)':'直線');
+  const lin = minor<1e-3 || (minor/Math.max(major,1e-9))<0.08; // ほぼ直線
+  return {major,minor,thetaDeg:theta*180/Math.PI,dir:lin?'直線的':dirn,pts,linear:lin};
+}
+
+async function runOrbit(){
+  if(!frames.length){log('[orbit] 先に動画を読み込んでください','er');return;}
+  if(!measurePts.length){log('[orbit] プレビューで点モードにして計測点を打ってください','er');return;}
+  const fps=parseFloat($('fps').value)||lastFpsGuess()||30;
+  const f=parseFloat($('orbFreq').value)||1;
+  const rad=10; // 追跡小窓の半径
+  showTab('orbit');
+  log(`[orbit] f=${f}Hz で ${measurePts.length}点を解析…`,'');
+  await tick();
+  const orbits=[];
+  for(const p of measurePts){
+    const [dx,dy]=trackPoint(p.x,p.y,rad);
+    const gx=goertzel(dx,fps,f), gy=goertzel(dy,fps,f);
+    const op=orbitParams(gx.amp,gx.phase,gy.amp,gy.phase);
+    orbits.push({x:p.x,y:p.y,f,Ax:gx.amp,px:gx.phase,Ay:gy.amp,py:gy.phase,...op});
+  }
+  lastOrbits={fps,f,orbits};
+  $('orbMeta').textContent=`f=${f}Hz, fps=${fps}, 点数=${orbits.length}, 追跡窓=±${rad}px（矢印=主振動方向, 楕円=1周期軌道, 倍率×${$('orbScale').value}）`;
+  drawOrbits();
+  fillOrbitTable();
+  $('dlOrbitCsv').disabled=false;
+}
+
+// 基準=点1（最初の点）の変位が最大になる位相 wt* を探索し、
+// その同一瞬間の全点変位ベクトルを返す（同位相スナップショット）
+function orbitSnapshot(){
+  const os=lastOrbits.orbits, ref=os[0];
+  let wtBest=0, dBest=-1;
+  for(let i=0;i<720;i++){
+    const wt=2*Math.PI*i/720;
+    const dx=ref.Ax*Math.cos(wt+ref.px), dy=ref.Ay*Math.cos(wt+ref.py);
+    const d=dx*dx+dy*dy;
+    if(d>dBest){dBest=d;wtBest=wt;}
+  }
+  const vecs=os.map(o=>({x:o.x,y:o.y,
+    vx:o.Ax*Math.cos(wtBest+o.px), vy:o.Ay*Math.cos(wtBest+o.py)}));
+  // |d1|最大は半周期ごとに2回（±d）ある → 基準ベクトルの x成分が正
+  // （xがほぼ0なら y成分が正）になる側を選び、表示の向きを安定させる
+  const r=vecs[0];
+  if(r.vx<-1e-9 || (Math.abs(r.vx)<1e-9 && r.vy<0)){
+    wtBest=(wtBest+Math.PI)%(2*Math.PI);
+    vecs.forEach(v=>{v.vx=-v.vx;v.vy=-v.vy;});
+  }
+  return {wt:wtBest,vecs};
+}
+function drawArrow(ctx,x0,y0,x1,y1,lw,ah){
+  ctx.lineWidth=lw;ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.stroke();
+  const aa=Math.atan2(y1-y0,x1-x0);
+  ctx.beginPath();ctx.moveTo(x1,y1);
+  ctx.lineTo(x1-ah*Math.cos(aa-0.42),y1-ah*Math.sin(aa-0.42));
+  ctx.moveTo(x1,y1);
+  ctx.lineTo(x1-ah*Math.cos(aa+0.42),y1-ah*Math.sin(aa+0.42));
+  ctx.stroke();
+}
+
+function drawOrbits(){
+  if(!lastOrbits)return;
+  if($('orbView')&&$('orbView').value==='vector'){drawOrbitVectors();return;}
+  const scale=parseFloat($('orbScale').value)||20;
+  // 左：フレーム上に重畳
+  const c=$('orbitFrame'), ctx=c.getContext('2d');
+  const arW=c.width/VW, arH=c.height/VH, ar=Math.min(arW,arH);
+  c.width=Math.min(480,VW); // フィット
+  const s=c.width/VW; c.height=VH*s;
+  ctx.setTransform(1,0,0,1,0,0);
+  // 背景フレーム
+  const tmp=document.createElement('canvas');tmp.width=VW;tmp.height=VH;
+  tmp.getContext('2d').putImageData(firstFrameImg,0,0);
+  ctx.drawImage(tmp,0,0,c.width,c.height);
+  ctx.save(); ctx.scale(s,s);
+  lastOrbits.orbits.forEach((o,i)=>{
+    // 楕円軌道（1周期のリサージュ、倍率適用）
+    ctx.strokeStyle='rgba(63,208,201,.9)';ctx.lineWidth=1.5/s;ctx.beginPath();
+    o.pts.forEach(([px,py],k)=>{
+      const X=o.x+px*scale, Y=o.y+py*scale;
+      k===0?ctx.moveTo(X,Y):ctx.lineTo(X,Y);
+    });
+    ctx.closePath();ctx.stroke();
+    // 主振動方向ベクトル（長軸方向, 倍率適用）
+    const th=o.thetaDeg*Math.PI/180, L=o.major*scale;
+    const ex=Math.cos(th)*L, ey=Math.sin(th)*L;
+    ctx.strokeStyle='#e5534b';ctx.lineWidth=2/s;ctx.beginPath();
+    ctx.moveTo(o.x-ex,o.y-ey);ctx.lineTo(o.x+ex,o.y+ey);ctx.stroke();
+    // 矢頭
+    const ah=6/s, aa=Math.atan2(ey,ex);
+    ctx.beginPath();ctx.moveTo(o.x+ex,o.y+ey);
+    ctx.lineTo(o.x+ex-ah*Math.cos(aa-0.4),o.y+ey-ah*Math.sin(aa-0.4));
+    ctx.moveTo(o.x+ex,o.y+ey);
+    ctx.lineTo(o.x+ex-ah*Math.cos(aa+0.4),o.y+ey-ah*Math.sin(aa+0.4));
+    ctx.stroke();
+    // 点番号
+    ctx.fillStyle='#e5534b';ctx.font=`${13/s}px monospace`;
+    ctx.fillText('#'+(i+1),o.x+8/s,o.y-8/s);
+  });
+  ctx.restore();
+
+  // 右：各点の拡大オービット（グリッド表示・共通関数）
+  drawOrbitZoomGrid();
+}
+
+// 右パネル：各点の拡大オービット（楕円/ベクトル両モード共通）
+function drawOrbitZoomGrid(){
+  const z=$('orbitZoom'), zx=z.getContext('2d');
+  zx.setTransform(1,0,0,1,0,0);zx.clearRect(0,0,z.width,z.height);
+  zx.fillStyle='#0a0e13';zx.fillRect(0,0,z.width,z.height);
+  const n=lastOrbits.orbits.length;
+  const cols=Math.ceil(Math.sqrt(n)), rows=Math.ceil(n/cols);
+  const cw=z.width/cols, ch=z.height/rows;
+  lastOrbits.orbits.forEach((o,i)=>{
+    const cxp=(i%cols)*cw+cw/2, cyp=Math.floor(i/cols)*ch+ch/2;
+    // 自動スケール：この点の最大半径をセルに合わせる
+    let rmax=1e-6;o.pts.forEach(([px,py])=>rmax=Math.max(rmax,Math.hypot(px,py)));
+    const sc=(Math.min(cw,ch)*0.36)/rmax;
+    // 十字
+    zx.strokeStyle='#1c232d';zx.lineWidth=1;zx.beginPath();
+    zx.moveTo(cxp-cw*0.4,cyp);zx.lineTo(cxp+cw*0.4,cyp);
+    zx.moveTo(cxp,cyp-ch*0.4);zx.lineTo(cxp,cyp+ch*0.4);zx.stroke();
+    // 楕円
+    zx.strokeStyle='#3fd0c9';zx.lineWidth=1.5;zx.beginPath();
+    o.pts.forEach(([px,py],k)=>{const X=cxp+px*sc,Y=cyp+py*sc;k===0?zx.moveTo(X,Y):zx.lineTo(X,Y);});
+    zx.closePath();zx.stroke();
+    // 主方向
+    const th=o.thetaDeg*Math.PI/180, L=o.major*sc;
+    zx.strokeStyle='#e5534b';zx.lineWidth=2;zx.beginPath();
+    zx.moveTo(cxp-Math.cos(th)*L,cyp-Math.sin(th)*L);
+    zx.lineTo(cxp+Math.cos(th)*L,cyp+Math.sin(th)*L);zx.stroke();
+    zx.fillStyle='#8b98a8';zx.font='11px monospace';
+    zx.fillText('#'+(i+1),cxp-cw*0.4+2,cyp-ch*0.4+12);
+  });
+}
+
+// 同位相ベクトル表示：点1の最大変位時刻における全点の同時刻変位ベクトル
+function drawOrbitVectors(){
+  const scale=parseFloat($('orbScale').value)||20;
+  const {wt,vecs}=orbitSnapshot();
+  const ref=vecs[0];
+  const refN=Math.hypot(ref.vx,ref.vy)||1e-9;
+
+  // 左：フレーム上に矢印を重畳
+  const c=$('orbitFrame'), ctx=c.getContext('2d');
+  c.width=Math.min(480,VW);
+  const s=c.width/VW; c.height=VH*s;
+  ctx.setTransform(1,0,0,1,0,0);
+  const tmp=document.createElement('canvas');tmp.width=VW;tmp.height=VH;
+  tmp.getContext('2d').putImageData(firstFrameImg,0,0);
+  ctx.drawImage(tmp,0,0,c.width,c.height);
+  ctx.save(); ctx.scale(s,s);
+  const os=lastOrbits.orbits;
+  vecs.forEach((v,i)=>{
+    // 下敷き：1周期の楕円軌道（薄く）
+    ctx.strokeStyle='rgba(63,208,201,.35)';ctx.lineWidth=1/s;ctx.beginPath();
+    os[i].pts.forEach(([px,py],k)=>{
+      const X=v.x+px*scale, Y=v.y+py*scale;
+      k===0?ctx.moveTo(X,Y):ctx.lineTo(X,Y);
+    });
+    ctx.closePath();ctx.stroke();
+    // 同位相ベクトル
+    const dot=(v.vx*ref.vx+v.vy*ref.vy)/(refN*(Math.hypot(v.vx,v.vy)||1e-9));
+    const col=i===0?'#f0c040':(dot>=0?'#e5534b':'#468cff'); // 基準=黄, 同位相=赤, 逆位相=青
+    ctx.strokeStyle=col;ctx.fillStyle=col;
+    drawArrow(ctx,v.x,v.y,v.x+v.vx*scale,v.y+v.vy*scale,2/s,7/s);
+    // 元位置マーカー
+    ctx.beginPath();ctx.arc(v.x,v.y,2.5/s,0,2*Math.PI);ctx.fill();
+    ctx.font=`${13/s}px monospace`;
+    ctx.fillText((i===0?'#1(基準)':'#'+(i+1)),v.x+8/s,v.y-8/s);
+  });
+  ctx.restore();
+
+  // 右：通常の各点拡大オービット（楕円モードと同じ表示）
+  drawOrbitZoomGrid();
+
+  $('orbMeta').textContent=
+    `同位相ベクトル: 基準=点1が最大変位となる位相 ωt*=${(wt*180/Math.PI).toFixed(1)}° の同一瞬間における各点の変位ベクトル`+
+    `（f=${lastOrbits.f}Hz, 倍率×${scale}）。黄=基準, 赤=基準と同じ向き成分（同位相）, 青=逆向き成分（逆位相）。`;
+}
+
+function fillOrbitTable(){
+  const tb=$('orbBody');tb.innerHTML='';
+  lastOrbits.orbits.forEach((o,i)=>{
+    const tr=document.createElement('tr');
+    tr.innerHTML=`<td>#${i+1}</td><td>(${o.x},${o.y})</td><td>${o.f.toFixed(2)}</td>
+      <td>${o.major.toFixed(3)}</td><td>${o.minor.toFixed(3)}</td>
+      <td>${o.thetaDeg.toFixed(1)}</td><td>${o.dir}</td>`;
+    tb.appendChild(tr);
+  });
+}
+
+// 周波数候補セレクト：analyze のピークから流し込む
+function refreshOrbitPeaks(){
+  const sel=$('orbPeakSel');if(!sel)return;
+  sel.innerHTML='<option value="">—</option>';
+  if(lastFFT){
+    const all=[...(lastFFT.peaksX||[]).map(p=>['X',p[0]]),
+               ...(lastFFT.peaksY||[]).map(p=>['Y',p[0]])];
+    all.sort((a,b)=>a[1]-b[1]);
+    all.forEach(([ax,f])=>{const o=document.createElement('option');
+      o.value=f.toFixed(3);o.textContent=`${f.toFixed(2)}Hz (${ax})`;sel.appendChild(o);});
+  }
+}
+if($('orbPeakSel')) $('orbPeakSel').onchange=e=>{if(e.target.value)$('orbFreq').value=e.target.value;};
+if($('runOrbit')) $('runOrbit').onclick=()=>guard(runOrbit);
+if($('orbScale')) $('orbScale').oninput=()=>{if(lastOrbits)drawOrbits();};
+if($('orbView')) $('orbView').onchange=()=>{if(lastOrbits)drawOrbits();};
+if($('dlOrbitCsv')) $('dlOrbitCsv').onclick=()=>{
+  if(!lastOrbits)return;
+  let s='# orbit analysis\n';
+  s+=`# fps,${lastOrbits.fps}\n# freq_hz,${lastOrbits.f}\n`;
+  s+='point,x_px,y_px,freq_hz,ampX_px,phaseX_rad,ampY_px,phaseY_rad,major_px,minor_px,angle_deg,rotation\n';
+  lastOrbits.orbits.forEach((o,i)=>{
+    s+=`${i+1},${o.x},${o.y},${o.f.toFixed(4)},${o.Ax.toFixed(5)},${o.px.toFixed(5)},${o.Ay.toFixed(5)},${o.py.toFixed(5)},${o.major.toFixed(5)},${o.minor.toFixed(5)},${o.thetaDeg.toFixed(3)},${o.dir}\n`;
+  });
+  dl(new Blob([s],{type:'text/csv'}),'evm_orbit.csv');
+  log('[orbit] evm_orbit.csv 保存','ok');
+};
+
+/* ============================================================
+   モード形状（ODS）: 全画素 Goertzel → 振幅・位相の空間分布
+   輝度時系列の指定振動数成分を画素ごとに抽出し、
+   位相基準（最大振幅画素）に対する A·cos(φ-φref) を色で表示。
+   縮小はブロック平均（純JS）なので OpenCV 不要。
+============================================================ */
+let lastMode=null;   // {sw,sh,amp,phase,amax,phiRef,f,fps,level}
+let modeAnim=null;   // アニメーションの requestAnimationFrame id
+
+// グレースケール時系列をブロック平均で 1/2^level に縮小して返す [T*P]
+function buildGraySmall(level){
+  const fac=1<<level, sw=VW>>level, sh=VH>>level, T=frames.length, P=sw*sh;
+  const g=new Float32Array(T*P);
+  for(let t=0;t<T;t++){
+    const d=frames[t].data, base=t*P;
+    for(let by=0;by<sh;by++){
+      for(let bx=0;bx<sw;bx++){
+        let s=0;
+        for(let y=by*fac;y<by*fac+fac;y++){
+          let idx=(y*VW+bx*fac)*4;
+          for(let x=0;x<fac;x++,idx+=4)
+            s+=0.299*d[idx]+0.587*d[idx+1]+0.114*d[idx+2];
+        }
+        g[base+by*sw+bx]=s/(fac*fac);
+      }
+    }
+  }
+  return {g,sw,sh,T,P};
+}
+
+async function runModeShape(){
+  if(!frames.length){log('[mode] 先に動画を読み込んでください','er');return;}
+  const fps=parseFloat($('fps').value)||lastFpsGuess()||30;
+  const f=parseFloat($('modeFreq').value)||1;
+  const level=Math.max(0,Math.min(5,+$('modeLevel').value|0));
+  if(f<=0||f>=fps/2){log(`[mode] 周波数は 0〜${(fps/2).toFixed(1)}Hz（ナイキスト）の範囲で`,'er');return;}
+  showTab('mode');
+  log(`[mode] f=${f}Hz level=${level} で全画素 Goertzel 解析…`,'hi');
+  await tick();
+
+  const {g,sw,sh,T,P}=buildGraySmall(level);
+
+  // 画素ごとの平均（DC）除去用
+  const mean=new Float64Array(P);
+  for(let t=0;t<T;t++){const base=t*P;for(let p=0;p<P;p++)mean[p]+=g[base+p];}
+  for(let p=0;p<P;p++)mean[p]/=T;
+
+  // Goertzel（全画素同時、時間ループ外側でキャッシュ効率化）
+  const k=2*Math.PI*f/fps, cw=Math.cos(k), swz=Math.sin(k), coeff=2*cw;
+  const s1=new Float64Array(P), s2=new Float64Array(P);
+  const win=new Float64Array(T);
+  for(let t=0;t<T;t++)win[t]=0.5-0.5*Math.cos(2*Math.PI*t/(T-1)); // Hann
+  for(let t=0;t<T;t++){
+    const base=t*P, w=win[t];
+    for(let p=0;p<P;p++){
+      const s0=coeff*s1[p]-s2[p]+(g[base+p]-mean[p])*w;
+      s2[p]=s1[p]; s1[p]=s0;
+    }
+    if(t%40===0)await tick();
+  }
+  const amp=new Float32Array(P), phase=new Float32Array(P);
+  let amax=0, pmax=0;
+  for(let p=0;p<P;p++){
+    const re=s1[p]-s2[p]*cw, im=s2[p]*swz;
+    amp[p]=2*Math.hypot(re,im)/T/0.5;   // Hann コヒーレントゲイン補正（goertzel と同じ）
+    phase[p]=Math.atan2(im,re);
+    if(amp[p]>amax){amax=amp[p];pmax=p;}
+  }
+  // 外れ値対策：99パーセンタイルを表示スケールに
+  const sorted=Float32Array.from(amp).sort();
+  const a99=sorted[Math.min(P-1,Math.floor(P*0.99))]||amax;
+
+  lastMode={sw,sh,amp,phase,amax:a99>0?a99:amax,phiRef:phase[pmax],f,fps,level};
+  drawModeShape(null);
+  $('modePlay').disabled=false; $('modePng').disabled=false;
+  $('modeMeta').textContent=
+    `f=${f}Hz, fps=${fps}, 解像度=${sw}×${sh}（1/${1<<level}）, frames=${T}, `+
+    `最大振幅画素=(${(pmax%sw)<<level},${(pmax/sw|0)<<level}) を位相基準に使用。`+
+    `赤＝基準と同位相 / 青＝逆位相。しきい値以下の画素は非表示。`;
+  log(`[mode] 完了: ${sw}x${sh}画素, 位相基準φref=${(phase[pmax]*180/Math.PI).toFixed(1)}°`,'ok');
+}
+
+// phaseT=null なら静止表示（cos(φ-φref)）、数値なら wt=phaseT のアニメフレーム
+function drawModeShape(phaseT){
+  if(!lastMode)return;
+  const {sw,sh,amp,phase,amax,phiRef}=lastMode;
+  const disp=$('modeDisp').value;
+  const thr=(parseFloat($('modeThr').value)||0)/100*amax;
+  const gain=Math.max(0.1,parseFloat($('modeGain').value)||1);
+
+  // オーバーレイ（sw×sh）を作る
+  const ov=new ImageData(sw,sh);
+  const od=ov.data;
+  for(let p=0;p<sw*sh;p++){
+    const A=amp[p];
+    let r=0,gg=0,b=0,al=0;
+    if(A>=thr){
+      const rel=Math.min(1,gain*A/amax);
+      if(disp==='amp'){
+        // 黄→赤のヒート
+        r=255; gg=Math.round(230*(1-rel)); b=40;
+        al=Math.round(230*Math.pow(rel,0.7));
+      }else if(disp==='phase'){
+        // 位相を色相に（HSV簡易変換）
+        const h=((phase[p]-phiRef)/(2*Math.PI)+1)%1;
+        const i=Math.floor(h*6), fr=h*6-i;
+        const q=1-fr;
+        const rgb=[[1,fr,0],[q,1,0],[0,1,fr],[0,q,1],[fr,0,1],[1,0,q]][i%6];
+        r=Math.round(rgb[0]*255);gg=Math.round(rgb[1]*255);b=Math.round(rgb[2]*255);
+        al=Math.round(220*Math.pow(rel,0.7));
+      }else{
+        // 符号付き：v = A·cos(φ-φref [+wt])
+        const ph=phase[p]-phiRef+(phaseT==null?0:phaseT);
+        const v=rel*Math.cos(ph);
+        if(v>=0){r=255;gg=70;b=70;} else {r=70;gg=140;b=255;}
+        al=Math.round(235*Math.pow(Math.abs(v),0.7));
+      }
+    }
+    const q4=p*4; od[q4]=r;od[q4+1]=gg;od[q4+2]=b;od[q4+3]=al;
+  }
+
+  // 背景（先頭フレームをやや暗く）＋オーバーレイ合成
+  const c=$('modeCanvas');
+  const s=Math.min(640/VW,1); c.width=Math.round(VW*s); c.height=Math.round(VH*s);
+  const ctx=c.getContext('2d');
+  const bg=document.createElement('canvas');bg.width=VW;bg.height=VH;
+  bg.getContext('2d').putImageData(firstFrameImg,0,0);
+  ctx.filter='grayscale(1) brightness(0.55)';
+  ctx.drawImage(bg,0,0,c.width,c.height);
+  ctx.filter='none';
+  const oc=document.createElement('canvas');oc.width=sw;oc.height=sh;
+  oc.getContext('2d').putImageData(ov,0,0);
+  ctx.imageSmoothingEnabled=true;
+  ctx.drawImage(oc,0,0,c.width,c.height);
+
+  // 凡例
+  ctx.font='12px sans-serif';ctx.textBaseline='top';
+  const legend=disp==='amp'?[['#ff2828','振幅 大'],['#ffe628','振幅 小']]
+             :disp==='phase'?[['#ff4646','位相=基準'],['#46f0f0','位相=±180°']]
+             :[['#ff4646','同位相 (+)'],['#468cff','逆位相 (−)']];
+  legend.forEach(([col,txt],i)=>{
+    ctx.fillStyle='rgba(0,0,0,.55)';ctx.fillRect(8,8+i*20,110,18);
+    ctx.fillStyle=col;ctx.fillRect(12,11+i*20,12,12);
+    ctx.fillStyle='#fff';ctx.fillText(txt,30,11+i*20);
+  });
+}
+
+function stopModeAnim(){
+  if(modeAnim!=null){cancelAnimationFrame(modeAnim);modeAnim=null;
+    if($('modePlay'))$('modePlay').textContent='▶ 1周期アニメ（スロー再生）';}
+}
+if($('modePlay')) $('modePlay').onclick=()=>{
+  if(!lastMode)return;
+  if(modeAnim!=null){stopModeAnim();drawModeShape(null);return;}
+  $('modePlay').textContent='⏸ 停止';
+  let wt=0;
+  const step=()=>{
+    wt+=2*Math.PI/150;           // 1周期 ≈ 2.5秒（実周波数によらずスロー）
+    drawModeShape(wt);
+    modeAnim=requestAnimationFrame(step);
+  };
+  modeAnim=requestAnimationFrame(step);
+};
+if($('modeRun')) $('modeRun').onclick=()=>{stopModeAnim();guard(runModeShape);};
+if($('modeDisp')) $('modeDisp').onchange=()=>{if(lastMode&&modeAnim==null)drawModeShape(null);};
+if($('modeThr')) $('modeThr').oninput=()=>{if(lastMode&&modeAnim==null)drawModeShape(null);};
+// 表示倍率：スライダーは対数（10^0〜10^2 = ×1〜×100）、数値入力と双方向同期
+if($('modeGainSl')) $('modeGainSl').oninput=e=>{
+  const g=Math.pow(10,parseFloat(e.target.value)||0);
+  $('modeGain').value=(g<10?g.toFixed(1):Math.round(g));
+  if(lastMode&&modeAnim==null)drawModeShape(null);
+};
+if($('modeGain')) $('modeGain').oninput=e=>{
+  const g=Math.max(0.1,parseFloat(e.target.value)||1);
+  $('modeGainSl').value=Math.max(0,Math.min(2,Math.log10(g)));
+  if(lastMode&&modeAnim==null)drawModeShape(null);
+};
+if($('modePng')) $('modePng').onclick=()=>{
+  $('modeCanvas').toBlob(b=>{if(b)dl(b,`evm_mode_${lastMode?lastMode.f.toFixed(2):''}Hz.png`);},'image/png');
+};
+function refreshModePeaks(){
+  const sel=$('modePeakSel');if(!sel)return;
+  sel.innerHTML='<option value="">—</option>';
+  if(lastFFT){
+    const all=[...(lastFFT.peaksX||[]).map(p=>['X',p[0]]),
+               ...(lastFFT.peaksY||[]).map(p=>['Y',p[0]])];
+    all.sort((a,b)=>a[1]-b[1]);
+    all.forEach(([ax,f])=>{const o=document.createElement('option');
+      o.value=f.toFixed(3);o.textContent=`${f.toFixed(2)}Hz (${ax})`;sel.appendChild(o);});
+  }
+}
+if($('modePeakSel')) $('modePeakSel').onchange=e=>{if(e.target.value)$('modeFreq').value=e.target.value;};
+
+/* ============================================================
+   spectral magnify UI（帯域選択・ピーク候補・生成ボタン）
+============================================================ */
+// analyze のピークを候補に流し込む
+function refreshSbPeaks(){
+  const sel=$('sbPeakSel'); if(!sel) return;
+  sel.innerHTML='<option value="">—</option>';
+  if(lastFFT){
+    const all=[...(lastFFT.peaksX||[]).map(p=>['X',p[0]]),
+               ...(lastFFT.peaksY||[]).map(p=>['Y',p[0]])];
+    all.sort((a,b)=>a[1]-b[1]);
+    all.forEach(([ax,f])=>{const o=document.createElement('option');
+      o.value=f.toFixed(3);o.textContent=`${f.toFixed(2)}Hz (${ax})`;sel.appendChild(o);});
+  }
+}
+function setBand(lo,hi){
+  lo=Math.max(0,lo); if(hi<=lo) hi=lo+0.1;
+  selBand={lo,hi};
+  $('sbLow').value=lo.toFixed(2); $('sbHigh').value=hi.toFixed(2);
+  redrawFFT();
+}
+function syncBandInputs(){
+  if(!selBand) return;
+  $('sbLow').value=selBand.lo.toFixed(2);
+  $('sbHigh').value=selBand.hi.toFixed(2);
+}
+if($('sbPeakSel')) $('sbPeakSel').onchange=e=>{
+  if(!e.target.value) return;
+  const f=+e.target.value, half=Math.max(0.3,f*0.1);
+  setBand(f-half,f+half);
+};
+['sbLow','sbHigh'].forEach(id=>{ const el=$(id); if(el) el.oninput=()=>{
+  const lo=+$('sbLow').value, hi=+$('sbHigh').value;
+  if(hi>lo){ selBand={lo,hi}; redrawFFT(); }
+};});
+if($('sbRun')) $('sbRun').onclick=()=>guard(runSpectralMagnify);
+
+// FFTグラフ上のドラッグで帯域を選択
+(function(){
+  const c=$('fftCanvas'); if(!c) return;
+  let drag=false, aHz=0;
+  const toHz=e=>{
+    if(!fftGeo) return 0;
+    const r=c.getBoundingClientRect();
+    const x=(e.clientX-r.left)*(c.width/r.width);
+    return Math.max(0,Math.min(fftGeo.fmaxView,(x-fftGeo.l)/fftGeo.plotW*fftGeo.fmaxView));
+  };
+  c.style.cursor='ew-resize';
+  c.addEventListener('mousedown',e=>{ if(!fftGeo)return; drag=true; aHz=toHz(e);
+    selBand={lo:aHz,hi:aHz}; redrawFFT(); });
+  window.addEventListener('mousemove',e=>{ if(!drag)return; const b=toHz(e);
+    selBand={lo:Math.min(aHz,b),hi:Math.max(aHz,b)}; redrawFFT(); syncBandInputs(); });
+  window.addEventListener('mouseup',()=>{ if(!drag)return; drag=false; syncBandInputs(); });
+})();
+
+
+function trackCentroid(roi){
+  const[x0,y0,x1,y1]=roi;
+  const cxs=[],cys=[];
+  for(const img of frames){
+    let sw=0,sx=0,sy=0;
+    const d=img.data,W=img.width;
+    for(let y=y0;y<y1;y++){
+      for(let x=x0;x<x1;x++){
+        const idx=(y*W+x)*4;
+        const g=0.299*d[idx]+0.587*d[idx+1]+0.114*d[idx+2];
+        const w=255-g;
+        sw+=w; sx+=w*x; sy+=w*y;
+      }
+    }
+    if(sw<1e-6){cxs.push(cxs.length?cxs[cxs.length-1]:0);
+                cys.push(cys.length?cys[cys.length-1]:0);}
+    else{cxs.push(sx/sw); cys.push(sy/sw);}
+  }
+  const mx=cxs.reduce((s,v)=>s+v,0)/cxs.length;
+  const my=cys.reduce((s,v)=>s+v,0)/cys.length;
+  return [cxs.map(v=>v-mx), cys.map(v=>v-my)];
+}
+
+/* ============================================================
+   ArUco 自動 ROI 検出
+============================================================ */
+function detectArucoRoi(img,pad=15){
+  if(!cv.aruco_Dictionary && !cv.getPredefinedDictionary && !('aruco' in cv)){
+    // OpenCV.js 4.10: cv.aruco_* / cv.Dictionary 形態
+  }
+  const src=cv.matFromImageData(img);
+  const gray=new cv.Mat();
+  cv.cvtColor(src,gray,cv.COLOR_RGBA2GRAY);
+  const dicts=['DICT_4X4_50','DICT_5X5_50','DICT_6X6_50'];
+  let result=null;
+  for(const dn of dicts){
+    try{
+      const dict=cv.getPredefinedDictionary(cv[dn]);
+      const params=new cv.aruco_DetectorParameters();
+      const det=new cv.aruco_ArucoDetector(dict,params);
+      const corners=new cv.MatVector();
+      const ids=new cv.Mat();
+      const rej=new cv.MatVector();
+      det.detectMarkers(gray,corners,ids,rej);
+      if(ids.rows>0){
+        const c=corners.get(0);   // 1x4 CV_32FC2
+        let xs=[],ys=[];
+        for(let k=0;k<4;k++){xs.push(c.data32F[k*2]);ys.push(c.data32F[k*2+1]);}
+        const x0=Math.max(0,Math.min(...xs)-pad)|0;
+        const y0=Math.max(0,Math.min(...ys)-pad)|0;
+        const x1=Math.min(VW,Math.max(...xs)+pad)|0;
+        const y1=Math.min(VH,Math.max(...ys)+pad)|0;
+        const id=ids.data32S[0];
+        log(`ArUco(${dn}) ID=${id} ROI=(${x0},${y0},${x1},${y1})`,'hi');
+        result=[x0,y0,x1,y1];
+      }
+      corners.delete();ids.delete();rej.delete();det.delete();params.delete();dict.delete();
+      if(result) break;
+    }catch(err){/* この辞書では失敗 → 次へ */}
+  }
+  src.delete();gray.delete();
+  return result;
+}
+
+/* ============================================================
+   magnify : Gaussian pyramid down → 時間bandpass → 増幅 → 復元
+============================================================ */
+// --- 共通 1) 空間ピラミッドダウン：全フレームを level 段縮小して float 時系列 small を作る ---
+async function evmPyramidDown(level){
+  const sw=VW>>level, sh=VH>>level, T=frames.length;
+  const small=new Float32Array(T*sw*sh*3);   // チャネル(R,G,B)ごとの時系列
+  for(let t=0;t<T;t++){
+    const m=cv.matFromImageData(frames[t]);
+    let cur=new cv.Mat(); cv.cvtColor(m,cur,cv.COLOR_RGBA2RGB);
+    cur.convertTo(cur,cv.CV_32F);
+    let work=cur;
+    for(let l=0;l<level;l++){const d=new cv.Mat();cv.pyrDown(work,d);work.delete();work=d;}
+    const base=t*sw*sh*3;
+    work.data32F && small.set(work.data32F.subarray(0,sw*sh*3),base);
+    work.delete(); m.delete();
+    if(t%30===0){$('magbar').style.width=`${100*t/T*0.4}%`; await tick();}
+  }
+  return {small,sw,sh,T,pxCount:sw*sh*3};
+}
+// --- 共通 3) small（増幅済み残差）をアップサンプルして原画に加算 → magFrames とプレビュー ---
+async function evmReconstruct(small,sw,sh,T,pxCount){
+  magFrames=[];
+  const oc=$('origCanvas'),mc=$('magCanvas');
+  oc.width=320;oc.height=Math.round(320*VH/VW);
+  mc.width=320;mc.height=Math.round(320*VH/VW);
+  for(let t=0;t<T;t++){
+    const smallMat=cv.matFromArray(sh,sw,cv.CV_32FC3,
+        Array.from(small.subarray(t*pxCount,(t+1)*pxCount)));
+    const up=new cv.Mat();
+    cv.resize(smallMat,up,new cv.Size(VW,VH),0,0,cv.INTER_LINEAR);
+    const m=cv.matFromImageData(frames[t]);
+    const rgb=new cv.Mat();cv.cvtColor(m,rgb,cv.COLOR_RGBA2RGB);rgb.convertTo(rgb,cv.CV_32F);
+    const out=new cv.Mat(); cv.add(rgb,up,out);
+    const u=new cv.Mat(); out.convertTo(u,cv.CV_8U);
+    const rgba=new cv.Mat(); cv.cvtColor(u,rgba,cv.COLOR_RGB2RGBA);
+    const id=new ImageData(new Uint8ClampedArray(rgba.data),VW,VH);
+    magFrames.push(id);
+    smallMat.delete();up.delete();m.delete();rgb.delete();out.delete();u.delete();rgba.delete();
+    if(t%30===0){$('magbar').style.width=`${100*t/T}%`;
+      drawScaled(oc,frames[t]);drawScaled(mc,id);await tick();}
+  }
+  $('magbar').style.width='100%';
+  drawScaled(oc,frames[0]); drawScaled(mc,magFrames[0]);
+  $('playMag').disabled=false; $('dlMag').disabled=false;
+}
+
+async function runMagnify(){
+  const fps=parseFloat($('fps').value)||lastFpsGuess()||30;
+  const low=+$('low').value, high=+$('high').value, alpha=+$('alpha').value;
+  const level=+$('level').value, order=+$('order').value;
+  log(`[magnify] ${VW}x${VH} fps=${fps} level=${level} bandpass ${low}-${high}Hz alpha=${alpha} order=${order}`,'hi');
+  showTab('magnify');
+
+  const {small,sw,sh,T,pxCount}=await evmPyramidDown(level);
+  log('[magnify] 空間ピラミッド完了 → 時間フィルタ（Butterworth）','');
+
+  // 各 small ピクセル時系列に bandpass filtfilt → α倍
+  const sections=butterBandpass(low,high,fps,order);
+  const col=new Float32Array(T);
+  for(let p=0;p<pxCount;p++){
+    for(let t=0;t<T;t++) col[t]=small[t*pxCount+p];
+    const fl=filtfiltSections(col,sections);
+    for(let t=0;t<T;t++) small[t*pxCount+p]=fl[t]*alpha;
+    if(p%5000===0){$('magbar').style.width=`${40+60*p/pxCount}%`; await tick();}
+  }
+  log('[magnify] 時間バンドパス + 増幅完了 → アップサンプル合成','');
+
+  await evmReconstruct(small,sw,sh,T,pxCount);
+  log(`[magnify] 完了: ${magFrames.length} frames 増幅`,'ok');
+}
+
+/* ============================================================
+   spectral magnify : FFTで指定帯域だけを取り出して増幅（逆FFTで再構成）
+   analyze のスペクトルを見て帯域[flo,fhi]と増幅率αを決め、動画を生成する。
+   各ピクセル時系列を FFT → 帯域外を0（端はレイズドコサイン）→ ×α → 逆FFT
+   → 原画に加算。Butterworth版 runMagnify の周波数領域バージョン。
+============================================================ */
+async function runSpectralMagnify(){
+  if(!CV_READY){log('[spectral] OpenCV未読込のため実行できません','er');return;}
+  if(!frames.length){log('[spectral] 動画が読み込まれていません','er');return;}
+  const fps=parseFloat($('fps').value)||lastFpsGuess()||30;
+  const flo=+$('sbLow').value, fhi=+$('sbHigh').value;
+  const alpha=+$('sbAlpha').value, level=+$('sbLevel').value;
+  if(!(fhi>flo)){log('[spectral] 帯域上限は下限より大きく設定してください','er');return;}
+  if(flo<0){log('[spectral] 帯域下限は0以上に','er');return;}
+  log(`[spectral] ${VW}x${VH} fps=${fps} level=${level} FFT帯域 ${flo}-${fhi}Hz alpha=${alpha}`,'hi');
+  showTab('magnify');
+
+  const {small,sw,sh,T,pxCount}=await evmPyramidDown(level);
+  log('[spectral] 空間ピラミッド完了 → FFT帯域選択','');
+
+  // FFT長（ゼロパディング）と帯域マスクを事前計算
+  let nfft=1; while(nfft<T) nfft<<=1;
+  const df=fps/nfft;
+  const tw=Math.max(df*2,(fhi-flo)*0.2);      // 遷移帯（リンギング抑制）
+  const gain=new Float64Array(nfft);
+  for(let i=0;i<nfft;i++){
+    const f=(i<=nfft/2)? i*df : (nfft-i)*df;  // 物理周波数 |f|（正・負とも対称）
+    gain[i]=bandGain(f,flo,fhi,tw);
+  }
+  const re=new Float64Array(nfft), im=new Float64Array(nfft), col=new Float32Array(T);
+  for(let p=0;p<pxCount;p++){
+    let mean=0;
+    for(let t=0;t<T;t++){col[t]=small[t*pxCount+p];mean+=col[t];}
+    mean/=T;
+    re.fill(0); im.fill(0);
+    for(let t=0;t<T;t++) re[t]=col[t]-mean;   // DC除去してゼロパディング
+    fftComplex(re,im,false);
+    for(let i=0;i<nfft;i++){re[i]*=gain[i]; im[i]*=gain[i];}   // 帯域選択
+    fftComplex(re,im,true);                    // 逆FFT（帯域だけの実信号）
+    for(let t=0;t<T;t++) small[t*pxCount+p]=re[t]*alpha;       // ×α
+    if(p%3000===0){$('magbar').style.width=`${40+60*p/pxCount}%`; await tick();}
+  }
+  log('[spectral] FFT帯域選択 + 増幅完了 → アップサンプル合成','');
+
+  await evmReconstruct(small,sw,sh,T,pxCount);
+  log(`[spectral] 完了: ${magFrames.length} frames（帯域 ${flo}-${fhi}Hz ×${alpha}）`,'ok');
+}
+
+function drawScaled(canvas,imgData){
+  const off=document.createElement('canvas');
+  off.width=imgData.width;off.height=imgData.height;
+  off.getContext('2d').putImageData(imgData,0,0);
+  const ctx=canvas.getContext('2d');
+  ctx.drawImage(off,0,0,canvas.width,canvas.height);
+}
+
+/* オービットの動きを増幅動画へ重畳：
+   frameIndex の時刻 t=frameIndex/fps における各点の瞬時変位を
+   x(t)=Ax cos(ωt+px), y(t)=Ay cos(ωt+py) で求め、軌道楕円＋現在位置マーカーを描く。
+   s = フレーム画素 → 描画先キャンバスのスケール（保存=1, プレビュー=mc.width/VW）*/
+function orbitOverlayOn(){ return $('ovOrbit') && $('ovOrbit').checked && lastOrbits && lastOrbits.orbits.length; }
+function drawOrbitOverlay(ctx,frameIndex,s){
+  if(!orbitOverlayOn()) return;
+  const scale=parseFloat($('orbScale').value)||20;
+  const fps=lastOrbits.fps||parseFloat($('fps').value)||30;
+  const t=frameIndex/fps;
+  ctx.save();
+  ctx.scale(s,s);                 // 以降はフレーム画素座標で描く
+  ctx.lineJoin='round';
+  lastOrbits.orbits.forEach((o,i)=>{
+    // 1周期の楕円軌道（薄く）
+    ctx.strokeStyle='rgba(63,208,201,.55)';ctx.lineWidth=1.3/s;ctx.beginPath();
+    o.pts.forEach(([px,py],k)=>{const X=o.x+px*scale,Y=o.y+py*scale;k===0?ctx.moveTo(X,Y):ctx.lineTo(X,Y);});
+    ctx.closePath();ctx.stroke();
+    // 瞬時変位（フレーム時刻に同期して軌道上を動く）
+    const w=2*Math.PI*o.f;
+    const X=o.x+o.Ax*Math.cos(w*t+o.px)*scale;
+    const Y=o.y+o.Ay*Math.cos(w*t+o.py)*scale;
+    // 中心→現在位置の半径ベクトル
+    ctx.strokeStyle='rgba(242,166,90,.9)';ctx.lineWidth=1.5/s;
+    ctx.beginPath();ctx.moveTo(o.x,o.y);ctx.lineTo(X,Y);ctx.stroke();
+    // 中心（元の計測点）
+    ctx.fillStyle='rgba(255,255,255,.75)';
+    ctx.beginPath();ctx.arc(o.x,o.y,2.2/s,0,7);ctx.fill();
+    // 現在位置マーカー（半径13.8px = 従来4.6pxの3倍）
+    ctx.fillStyle='#e5534b';
+    ctx.beginPath();ctx.arc(X,Y,13.8/s,0,7);ctx.fill();
+    ctx.strokeStyle='#fff';ctx.lineWidth=1.5/s;ctx.stroke();
+    // 点番号
+    ctx.fillStyle='#f2a65a';ctx.font=`${12/s}px monospace`;
+    ctx.fillText('#'+(i+1),o.x+7/s,o.y-8/s);
+  });
+  ctx.restore();
+}
+// チェックON/OFF時に現在のプレビューを描き直す
+if($('ovOrbit')) $('ovOrbit').onchange=()=>{
+  if(!magFrames.length) return;
+  const mc=$('magCanvas'), idx=playIdx%magFrames.length;
+  drawScaled(mc,magFrames[idx]); drawOrbitOverlay(mc.getContext('2d'),idx,mc.width/VW);
+};
+
+/* ループ再生 */
+let playing=false,playIdx=0,playTimer=null;
+$('playMag').onclick=()=>{
+  if(playing){playing=false;clearInterval(playTimer);$('playMag').textContent='▶ ループ再生';return;}
+  playing=true;$('playMag').textContent='⏸ 停止';
+  const oc=$('origCanvas'),mc=$('magCanvas');
+  const fps=parseFloat($('fps').value)||30;
+  playTimer=setInterval(()=>{
+    drawScaled(oc,frames[playIdx]); drawScaled(mc,magFrames[playIdx]);
+    drawOrbitOverlay(mc.getContext('2d'),playIdx,mc.width/VW);
+    playIdx=(playIdx+1)%magFrames.length;
+  },Math.max(16,1000/Math.min(fps,60)));
+};
+
+/* webm 保存 */
+$('dlMag').onclick=async()=>{
+  if(!magFrames.length) return;
+  log('[save] webm エンコード中…','');
+  const c=document.createElement('canvas');c.width=VW;c.height=VH;
+  const ctx=c.getContext('2d');
+  const fps=Math.min(parseFloat($('fps').value)||30,60);
+  const stream=c.captureStream(fps);
+  const mime=MediaRecorder.isTypeSupported('video/webm;codecs=vp9')?'video/webm;codecs=vp9':'video/webm';
+  const rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:8e6});
+  const chunks=[];rec.ondataavailable=e=>chunks.push(e.data);
+  const done=new Promise(r=>rec.onstop=r);
+  rec.start();
+  for(let i=0;i<magFrames.length;i++){
+    ctx.putImageData(magFrames[i],0,0);
+    drawOrbitOverlay(ctx,i,1);
+    await new Promise(r=>setTimeout(r,1000/fps));
+  }
+  rec.stop(); await done;
+  const blob=new Blob(chunks,{type:'video/webm'});
+  dl(blob,'evm_magnified.webm');
+  log('[save] evm_magnified.webm 保存','ok');
+};
+
+/* ============================================================
+   analyze
+============================================================ */
+async function runAnalyze(){
+  const fps=parseFloat($('fps').value)||lastFpsGuess()||30;
+  let roi=null;
+  if($('rx0').value!==''&&$('rx1').value!==''){
+    roi=[+$('rx0').value,+$('ry0').value,+$('rx1').value,+$('ry1').value];
+    log(`[analyze] 指定ROI=${roi}`,'');
+  } else if($('autoRoi').checked){
+    if(!CV_READY){
+      log('[analyze] OpenCV未読込のため ArUco自動検出は不可 → ROIを手動指定するか中央ROIを使用','er');
+    }else{
+      roi=detectArucoRoi(firstFrameImg);
+      if(!roi){log('[analyze] ArUco未検出 → 中央ROIにフォールバック','er');}
+    }
+  }
+  if(!roi){
+    roi=[VW/2-60|0,VH/2-60|0,VW/2+60|0,VH/2+60|0];
+    log(`[analyze] 中央ROI=${roi}`,'');
+  }
+  // ROIを画面に反映
+  $('rx0').value=roi[0];$('ry0').value=roi[1];$('rx1').value=roi[2];$('ry1').value=roi[3];
+  redrawPick();
+
+  showTab('analyze');
+  log('[analyze] ROI重心トラッキング中…','');
+  await tick();
+  const [dx,dy]=trackCentroid(roi);
+  lastDx=dx;lastDy=dy;lastFps=fps;
+
+  const np=+$('npeaks').value, fmin=+$('fmin').value;
+  const X=fftPeaks(dx,fps,np,fmin);
+  const Y=fftPeaks(dy,fps,np,fmin);
+  lastFFT={freq:X.freq, magX:X.mag, magY:Y.mag, peaksX:X.peaks, peaksY:Y.peaks};
+  log(`[analyze] ${dx.length} frames, fps=${fps}`,'');
+  log('=== X方向 卓越振動数 ===','hi');
+  X.peaks.forEach(([f,m])=>log(`  ${f.toFixed(2)} Hz  (振幅 ${m.toFixed(1)})`));
+  log('=== Y方向 卓越振動数 ===','hi');
+  Y.peaks.forEach(([f,m])=>log(`  ${f.toFixed(2)} Hz  (振幅 ${m.toFixed(1)})`));
+
+  drawFFT(X,Y,fps);
+  fillPeakTable(X.peaks,Y.peaks);
+  $('anaMeta').textContent=`frames=${dx.length}, fps=${fps}, ROI=(${roi.join(',')})`;
+  $('dlCsv').disabled=false;
+  $('dlFftCsv').disabled=false;
+  refreshOrbitPeaks();
+  if($('runOrbit')) $('runOrbit').disabled=false;
+
+  // モード形状：候補を流し込み、最強ピークを初期値に
+  refreshModePeaks();
+  if($('modeRun')) $('modeRun').disabled=false;
+  const topM=[...(X.peaks||[]),...(Y.peaks||[])].sort((a,b)=>b[1]-a[1])[0];
+  if(topM && $('modeFreq')) $('modeFreq').value=topM[0].toFixed(2);
+
+  // スペクトル増幅：ピーク候補を流し込み、最強ピーク周辺を初期帯域に
+  refreshSbPeaks();
+  const top=[...(X.peaks||[]),...(Y.peaks||[])].sort((a,b)=>b[1]-a[1])[0];
+  if(top){ const f=top[0], half=Math.max(0.3,f*0.1); setBand(f-half,f+half); }
+  if($('sbRun')) $('sbRun').disabled=!CV_READY;
+  $('sbMeta').textContent = CV_READY
+    ? `帯域を指定して「この帯域で増幅動画を生成」を押してください（fps=${fps}, 表示上限=${Math.min(fps/2,30).toFixed(1)}Hz）。`
+    : '※ OpenCV.js 未読込のため生成は使えません（読み込み完了後にもう一度 analyze を実行してください）。';
+}
+
+function fillPeakTable(px,py){
+  const tb=$('peakBody');tb.innerHTML='';
+  const n=Math.max(px.length,py.length);
+  for(let i=0;i<n;i++){
+    const tr=document.createElement('tr');
+    const xf=px[i]?px[i][0].toFixed(2):'—', xm=px[i]?px[i][1].toFixed(1):'';
+    const yf=py[i]?py[i][0].toFixed(2):'—', ym=py[i]?py[i][1].toFixed(1):'';
+    tr.innerHTML=`<td>${i+1}</td><td class="fx">${xf}</td><td>${xm}</td>
+                  <td class="fy">${yf}</td><td>${ym}</td>`;
+    tb.appendChild(tr);
+  }
+}
+
+let fftGeo=null;         // スペクトル描画のジオメトリ（マウス↔Hz変換用）
+let selBand=null;        // 選択中の帯域 {lo,hi}
+let lastFFTdraw=null;    // 帯域だけ再描画するための最後のFFT結果
+function redrawFFT(){ if(lastFFTdraw) drawFFT(lastFFTdraw.X,lastFFTdraw.Y,lastFFTdraw.fps); }
+function drawSelBand(ctx){
+  if(!fftGeo||!selBand) return;
+  const x0=fftGeo.l+fftGeo.plotW*Math.max(0,selBand.lo)/fftGeo.fmaxView;
+  const x1=fftGeo.l+fftGeo.plotW*Math.min(fftGeo.fmaxView,selBand.hi)/fftGeo.fmaxView;
+  const w=Math.max(1,x1-x0);
+  ctx.fillStyle='rgba(87,201,138,.15)';
+  ctx.fillRect(x0,fftGeo.yTop,w,fftGeo.yBot-fftGeo.yTop);
+  ctx.strokeStyle='rgba(87,201,138,.75)';ctx.lineWidth=1;
+  ctx.strokeRect(x0,fftGeo.yTop,w,fftGeo.yBot-fftGeo.yTop);
+}
+function drawFFT(X,Y,fps){
+  lastFFTdraw={X,Y,fps};
+  const c=$('fftCanvas'),ctx=c.getContext('2d');
+  const W=c.width,H=c.height;
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='#0a0e13';ctx.fillRect(0,0,W,H);
+  const fmaxView=Math.min(fps/2,30);
+  const pad={l:46,r:14,t:26,b:30};
+  const plotW=W-pad.l-pad.r, plotH=(H-pad.t-pad.b-20)/2;
+  fftGeo={l:pad.l,plotW,fmaxView,yTop:pad.t,yBot:pad.t+2*plotH+20};
+  drawSelBand(ctx);   // 選択帯域を背面に
+  function panel(F,M,peaks,y0,color,label){
+    // x範囲: 0..fmaxView
+    const nView=F.findIndex(f=>f>fmaxView);
+    const NV=nView<0?F.length:nView;
+    let mmax=1e-9;for(let i=1;i<NV;i++) mmax=Math.max(mmax,M[i]);
+    // 軸
+    ctx.strokeStyle='#2a3441';ctx.lineWidth=1;
+    ctx.strokeRect(pad.l,y0,plotW,plotH);
+    ctx.fillStyle='#8b98a8';ctx.font='11px monospace';
+    ctx.fillText(label,pad.l+4,y0+13);
+    // grid x
+    for(let hz=0;hz<=fmaxView;hz+=5){
+      const x=pad.l+plotW*hz/fmaxView;
+      ctx.strokeStyle='#1c232d';ctx.beginPath();ctx.moveTo(x,y0);ctx.lineTo(x,y0+plotH);ctx.stroke();
+      ctx.fillStyle='#5a6675';ctx.fillText(hz+'',x-4,y0+plotH+14);
+    }
+    // peak lines
+    peaks.forEach(([f])=>{
+      if(f>fmaxView)return;
+      const x=pad.l+plotW*f/fmaxView;
+      ctx.strokeStyle='rgba(229,83,75,.6)';ctx.setLineDash([4,3]);
+      ctx.beginPath();ctx.moveTo(x,y0);ctx.lineTo(x,y0+plotH);ctx.stroke();ctx.setLineDash([]);
+      ctx.fillStyle='#e5534b';ctx.fillText(f.toFixed(1),x+2,y0+11);
+    });
+    // spectrum
+    ctx.strokeStyle=color;ctx.lineWidth=1.4;ctx.beginPath();
+    for(let i=1;i<NV;i++){
+      const x=pad.l+plotW*F[i]/fmaxView;
+      const y=y0+plotH-plotH*M[i]/mmax;
+      i===1?ctx.moveTo(x,y):ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+  }
+  panel(X.freq,X.mag,X.peaks,pad.t,'#3fd0c9','FFT amplitude — X');
+  panel(Y.freq,Y.mag,Y.peaks,pad.t+plotH+20,'#f2a65a','FFT amplitude — Y');
+  ctx.fillStyle='#8b98a8';ctx.font='11px monospace';
+  ctx.fillText('Hz',W-pad.r-14,H-8);
+}
+
+/* CSV 保存 */
+$('dlCsv').onclick=()=>{
+  if(!lastDx)return;
+  let s='t_sec,dx_px,dy_px\n';
+  for(let i=0;i<lastDx.length;i++)
+    s+=`${(i/lastFps).toFixed(6)},${lastDx[i].toFixed(5)},${lastDy[i].toFixed(5)}\n`;
+  dl(new Blob([s],{type:'text/csv'}),'evm_displacement.csv');
+  log('[analyze] evm_displacement.csv 保存','ok');
+};
+
+/* FFT結果 CSV 保存（周波数ごとのX/Y振幅スペクトル ＋ ピーク一覧をヘッダに付記） */
+$('dlFftCsv').onclick=()=>{
+  if(!lastFFT)return;
+  const {freq,magX,magY,peaksX,peaksY}=lastFFT;
+  const fmaxView=Math.min((lastFps||30)/2, 100);  // ナイキストまで（上限100Hz）
+  let s='';
+  // ピーク情報をコメント行として先頭に
+  s+='# EVM analyze FFT result\n';
+  s+=`# fps,${lastFps}\n`;
+  s+=`# n_samples,${lastDx?lastDx.length:''}\n`;
+  s+='# X_peaks(Hz:amp),'+peaksX.map(([f,m])=>`${f.toFixed(3)}:${m.toFixed(2)}`).join(' ')+'\n';
+  s+='# Y_peaks(Hz:amp),'+peaksY.map(([f,m])=>`${f.toFixed(3)}:${m.toFixed(2)}`).join(' ')+'\n';
+  // 本体: 周波数, X振幅, Y振幅
+  s+='freq_hz,amp_x,amp_y\n';
+  for(let i=0;i<freq.length;i++){
+    if(freq[i]>fmaxView) break;
+    s+=`${freq[i].toFixed(5)},${magX[i].toFixed(6)},${magY[i].toFixed(6)}\n`;
+  }
+  dl(new Blob([s],{type:'text/csv'}),'evm_fft_spectrum.csv');
+  log('[analyze] evm_fft_spectrum.csv 保存','ok');
+};
+
+/* ============================================================
+   実行ボタン
+============================================================ */
+$('runMag').onclick =()=>guard(runMagnify);
+$('runAna').onclick =()=>guard(runAnalyze);
+$('runBoth').onclick=()=>guard(async()=>{await runMagnify();await runAnalyze();});
+async function guard(fn){
+  ['runMag','runAna','runBoth','sbRun'].forEach(id=>$(id)&&($(id).disabled=true));
+  try{await fn();}catch(e){
+    // OpenCV.js(WASM) の abort は Error でなく数値/文字列で飛んでくることがある
+    let msg = (e && e.message) ? e.message : String(e);
+    if(typeof e==='number' && typeof cv!=='undefined' && cv.exceptionFromPtr){
+      try{ msg = cv.exceptionFromPtr(e).msg || msg; }catch(_){}
+    }
+    log('エラー: '+msg+'（メモリ不足の場合は 処理解像度の長辺上限 / stride / 最大フレーム数 を下げてください）','er');
+    console.error(e);
+  }
+  refreshButtons();
+}
+
+/* ============================================================
+   utils
+============================================================ */
+function dl(blob,name){const a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);a.download=name;a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);}
+function tick(){return new Promise(r=>setTimeout(r,0));}
+function lastFpsGuess(){return parseFloat($('fps').value)||30;}
+
+/* 起動時に OpenCV.js を読み込み開始（複数CDNフォールバック） */
+loadOpenCV();
+</script>
+</body>
+</html>
