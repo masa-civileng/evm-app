@@ -132,7 +132,13 @@
           <label class="field"><span>処理解像度 長辺上限 px（0=原寸）</span>
             <input type="number" id="procMax" value="640" step="16" min="0"></label>
         </div>
-        <p class="hint">読み込みは動画を等倍再生しながら各フレームを取得します（シークしないので 6000fr でも実時間ベースで完了）。フレームは RGBA 生データで保持するため <b>幅×高さ×4 byte/枚</b>（640×480≈1.2MB、1920×1080≈8.3MB）。magnify は増幅後フレームも同量保持するので、フルHD 1200枚だと約 9.5GB×2 となりタブが落ちます。<b>長辺上限</b>で縮小（640 なら フルHD比 1/9）し、長尺は stride で間引いてください。</p>
+        <div class="row">
+          <label class="field"><span>読込開始 秒</span>
+            <input type="number" id="trimStart" value="0" step="0.5" min="0"></label>
+          <label class="field"><span>読込終了 秒（0=最後まで）</span>
+            <input type="number" id="trimEnd" value="0" step="0.5" min="0"></label>
+        </div>
+        <p class="hint">読み込みは動画を等倍再生しながら各フレームを取得します（シークしないので 6000fr でも実時間ベースで完了）。フレームは RGBA 生データで保持するため <b>幅×高さ×4 byte/枚</b>（640×480≈1.2MB、1920×1080≈8.3MB）。magnify は増幅後フレームも同量保持するので、フルHD 1200枚だと約 9.5GB×2 となりタブが落ちます。<b>長辺上限</b>で縮小（640 なら フルHD比 1/9）し、長尺は<b>読込区間</b>で必要な時間帯だけを切り出すか stride で間引いてください。読み込み前に必要メモリを自動見積もりし、大きすぎる場合は警告を出します。周波数分解能は Δf=1/T なので、卓越振動数を見るだけなら 10〜30 秒あれば十分です。</p>
       </div>
 
       <div class="card" id="magCard" style="margin-top:16px">
@@ -522,7 +528,59 @@ async function loadVideoFile(f){
     log(`[load] 処理解像度を縮小: ${ow}x${oh} → ${VW}x${VH}（約${(ow*oh/(VW*VH)).toFixed(1)}分の1のメモリ）`,'hi');
   }
   const estMB=VW*VH*4/1048576;
-  log(`[load] メモリ目安: ${estMB.toFixed(1)}MB/枚 × フレーム数（magnify 時はさらに同量の増幅フレームを保持）`,'');
+
+  // --- 読込区間の決定（クランプ） ---
+  let trimS=Math.max(0,parseFloat($('trimStart').value)||0);
+  let trimE=parseFloat($('trimEnd').value)||0;
+  if(trimE<=0 || trimE>v.duration) trimE=v.duration;
+  if(trimS>=trimE){
+    log(`[load] 読込開始(${trimS}s)が終了(${trimE.toFixed(1)}s)以降のため 0s からに変更します`,'er');
+    trimS=0;
+  }
+  const spanSec=trimE-trimS;
+
+  // --- メモリ事前見積もり ---
+  const fpsGuess=parseFloat($('fps').value)||30;   // 見積もり用（未入力なら30と仮定）
+  const strideEst=Math.max(1,parseInt($('stride').value)||1);
+  const maxFEst=parseInt($('maxFrames').value)||0;
+  let estFrames=Math.floor(spanSec*fpsGuess/strideEst);
+  if(maxFEst>0) estFrames=Math.min(estFrames,maxFEst);
+  const estLoadGB=estFrames*VW*VH*4/1073741824;          // 読み込みのみ
+  const estTotalGB=estLoadGB*2;                          // magnify 実行時（増幅フレームも保持）
+  log(`[load] 見積もり: 区間 ${trimS.toFixed(1)}〜${trimE.toFixed(1)}s / 約${estFrames}枚 / `
+     +`読み込み ${estLoadGB.toFixed(2)}GB（magnify 実行時 計${estTotalGB.toFixed(2)}GB）`, estTotalGB>2?'er':'');
+
+  // --- 危険水準なら警告して確認（既定閾値: magnify込みで 2GB） ---
+  if(estTotalGB>2){
+    // 対策の目安を計算して提示
+    const okFrames=Math.floor(1*1073741824/(VW*VH*4));   // 読み込み1GBに収まる枚数
+    const sugSec=Math.max(5,Math.floor(okFrames*strideEst/fpsGuess));
+    const sugStride=Math.ceil(estFrames/okFrames)*strideEst;
+    const msg=
+`メモリ使用量が大きく、ブラウザのタブが落ちる可能性があります。
+
+見積もり: 約${estFrames}枚 / ${VW}×${VH}
+  読み込みのみ : ${estLoadGB.toFixed(2)} GB
+  magnify実行時: ${estTotalGB.toFixed(2)} GB（増幅フレームも保持するため2倍）
+
+対策の目安（いずれか）:
+ ・読込区間を ${sugSec} 秒以下にする（現在 ${spanSec.toFixed(1)} 秒）
+ ・stride を ${sugStride} 以上にする（実効fpsが下がる点に注意）
+ ・処理解像度 長辺上限を下げる（現在 ${procCap||'原寸'}）
+
+このまま読み込みを続けますか？
+（OK=続行 / キャンセル=中止して設定を変更）`;
+    if(!window.confirm(msg)){
+      log('[load] 見積もり警告により読み込みを中止しました。設定を変更して再度お試しください。','hi');
+      $('vidInfo').innerHTML='<span style="color:var(--warn)">読み込み中止（メモリ見積もり超過）。区間・stride・解像度を調整してください</span>';
+      $('loadbar').style.width='0';
+      URL.revokeObjectURL(url);
+      refreshButtons();
+      return;
+    }
+    log('[load] 警告を確認のうえ続行します','er');
+  }
+
   // fps欄に値があればメタ推定は不要（推定の再生待ちでハングするのを避ける）
   const fpsField=parseFloat($('fps').value);
   let metaFps;
@@ -533,7 +591,7 @@ async function loadVideoFile(f){
     metaFps=await guessFps(v);
     log(`動画: ${f.name}  ${VW}x${VH}  duration=${v.duration.toFixed(2)}s  meta-fps≈${metaFps}`);
   }
-  await extractFrames(v,metaFps);
+  await extractFrames(v,metaFps,trimS,trimE);
   URL.revokeObjectURL(url);
   refreshButtons();
 }
@@ -571,10 +629,11 @@ async function guessFps(v){
    既定は「等倍再生しながら requestVideoFrameCallback で出てくるフレームを拾う」方式。
    1フレームごとの seek 往復を避けるため 6000fr でも実時間ベースで終わる。
    stride>1 で間引き、maxF で上限。rVFC 非対応ブラウザは seek 方式にフォールバック。*/
-async function extractFrames(v,metaFps){
+async function extractFrames(v,metaFps,trimS=0,trimE=0){
   const fpsIn=parseFloat($('fps').value)||metaFps||30;
   const maxF=parseInt($('maxFrames').value)||0;
   const stride=Math.max(1,parseInt($('stride').value)||1);
+  if(!trimE || trimE>v.duration) trimE=v.duration;
   const cv2=document.createElement('canvas');
   cv2.width=VW; cv2.height=VH;
   const ctx=cv2.getContext('2d',{willReadFrequently:true});
@@ -584,14 +643,14 @@ async function extractFrames(v,metaFps){
     frames.push(img);
     if(frames.length===1){firstFrameImg=img;drawPick();}
     if(frames.length%20===0){
-      $('loadbar').style.width=`${maxF?100*frames.length/maxF:Math.min(99,frames.length/10)}%`;
-      $('vidInfo').textContent=`展開中 ${frames.length} frames（再生位置 ${shownIdx}）…`;
+      $('loadbar').style.width=`${maxF?100*frames.length/maxF:Math.min(99,100*(v.currentTime-trimS)/(trimE-trimS))}%`;
+      $('vidInfo').textContent=`展開中 ${frames.length} frames（${v.currentTime.toFixed(1)}s / ${trimE.toFixed(1)}s）…`;
     }
   };
 
   const hasRVFC=('requestVideoFrameCallback' in HTMLVideoElement.prototype);
   if(hasRVFC){
-    log(`[load] 再生ベース展開（stride=${stride}, 上限=${maxF||'なし'}）`,'');
+    log(`[load] 再生ベース展開（区間 ${trimS.toFixed(1)}〜${trimE.toFixed(1)}s, stride=${stride}, 上限=${maxF||'なし'}）`,'');
     const r=await new Promise(resolve=>{
       let seen=0,settled=false;
       const finish=val=>{if(settled)return;settled=true;clearInterval(watch);
@@ -608,30 +667,35 @@ async function extractFrames(v,metaFps){
           }
         }else{stall=0;lastSeen=seen;}
       },1000);
-      const cb=()=>{
+      const cb=(now,meta)=>{
         if(settled)return;
-        if(seen%stride===0) onGot(grab(),seen);
-        seen++;
+        const t=meta?meta.mediaTime:v.currentTime;
+        if(t>=trimE){finish('done');return;}          // 終了秒に到達
+        if(t>=trimS){                                  // 区間内のみ取得
+          if(seen%stride===0) onGot(grab(),seen);
+          seen++;
+        }
         const enough=(maxF && frames.length>=maxF);
         if(enough || v.ended){finish('done');return;}
         v.requestVideoFrameCallback(cb);
       };
       v.requestVideoFrameCallback(cb);
       v.onended=()=>{ if(!settled && !(maxF&&frames.length>=maxF)) finish('done'); };
-      v.currentTime=0;
+      v.currentTime=trimS;                             // 開始秒から再生
       v.play().catch(()=>{
         log('[load] 自動再生不可 → seek 方式にフォールバック','er');
         finish('fallback');
       });
     });
-    if(r==='fallback'){frames=[];firstFrameImg=null;await extractBySeek(v,fpsIn,maxF,stride,ctx);}
+    if(r==='fallback'){frames=[];firstFrameImg=null;await extractBySeek(v,fpsIn,maxF,stride,ctx,trimS,trimE);}
   } else {
     log('[load] requestVideoFrameCallback 非対応 → seek 方式','er');
-    await extractBySeek(v,fpsIn,maxF,stride,ctx);
+    await extractBySeek(v,fpsIn,maxF,stride,ctx,trimS,trimE);
   }
 
   $('loadbar').style.width='100%';
   $('vidInfo').innerHTML=`<b>${frames.length}</b> frames / ${VW}×${VH} / fps=${fpsIn}`
+    + (trimS>0||trimE<v.duration ? ` / 区間 ${trimS.toFixed(1)}–${trimE.toFixed(1)}s`:'')
     + (stride>1?` / 間引き×${stride}（実効fps≈${(fpsIn/stride).toFixed(1)}）`:'');
   log(`フレーム展開完了: ${frames.length} 枚`,'ok');
   if($('runOrbit')) $('runOrbit').disabled=false;
@@ -639,13 +703,14 @@ async function extractFrames(v,metaFps){
 }
 
 /* フォールバック: 旧来の seek 方式（rVFC が無い/再生不可のとき） */
-async function extractBySeek(v,fpsIn,maxF,stride,ctx){
+async function extractBySeek(v,fpsIn,maxF,stride,ctx,trimS=0,trimE=0){
+  if(!trimE || trimE>v.duration) trimE=v.duration;
   const dt=stride/fpsIn;
-  const total=maxF>0 ? Math.min(maxF,Math.floor(v.duration*fpsIn/stride))
-                     : Math.floor(v.duration*fpsIn/stride);
+  let total=Math.floor((trimE-trimS)*fpsIn/stride);
+  if(maxF>0) total=Math.min(maxF,total);
   v.pause();
   for(let i=0;i<total;i++){
-    const t=i*dt; if(t>=v.duration) break;
+    const t=trimS+i*dt; if(t>=trimE || t>=v.duration) break;
     await seek(v,t);
     ctx.drawImage(v,0,0,VW,VH);
     const img=ctx.getImageData(0,0,VW,VH);
