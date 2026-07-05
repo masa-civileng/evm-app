@@ -143,7 +143,7 @@
           <label class="field"><span>読込終了 秒（0=最後まで / 初期値5秒）</span>
             <input type="number" id="trimEnd" value="5" step="0.5" min="0"></label>
         </div>
-        <p class="hint">読み込みは動画を等倍再生しながら各フレームを取得します（シークしないので 6000fr でも実時間ベースで完了）。フレームは RGBA 生データで保持するため <b>幅×高さ×4 byte/枚</b>（640×480≈1.2MB、1920×1080≈8.3MB）。magnify は増幅後フレームも同量保持するので、フルHD 1200枚だと約 9.5GB×2 となりタブが落ちます。<b>長辺上限</b>で縮小（640 なら フルHD比 1/9）し、長尺は<b>読込区間</b>で必要な時間帯だけを切り出すか stride で間引いてください。読み込み前に必要メモリを自動見積もりし、大きすぎる場合は警告を出します。周波数分解能は Δf=1/T なので、卓越振動数を見るだけなら 10〜30 秒あれば十分です。</p>
+        <p class="hint">MP4/MOV は <b>WebCodecs 高速デコード</b>で読み込みます（再生・シークをせず直接デコードするため、大きなファイルでも指定区間だけを数秒〜十数秒で展開。全フレームを漏れなく取得）。非対応ブラウザや webm は従来の再生方式に自動フォールバックします。フレームは RGBA 生データで保持するため <b>幅×高さ×4 byte/枚</b>（640×480≈1.2MB、1920×1080≈8.3MB）。magnify は増幅後フレームも同量保持するので、<b>長辺上限</b>で縮小し、長尺は<b>読込区間</b>で必要な時間帯だけを切り出すか stride で間引いてください。読み込み前に必要メモリを自動見積もりし、大きすぎる場合は警告を出します。周波数分解能は Δf=1/T なので、卓越振動数を見るだけなら 10〜30 秒あれば十分です。</p>
       </div>
 
       <div class="card" id="magCard" style="margin-top:16px">
@@ -559,11 +559,12 @@ async function loadVideoFile(f){
 
   // --- fps の決定（0=自動検出して「共通設定」に自動入力 / 手入力があればそれを優先） ---
   const fpsField=parseFloat($('fps').value);
-  let metaFps;
+  let metaFps, fpsWasAuto=false;
   if(fpsField>0){
     metaFps=fpsField;
     log(`動画: ${f.name}  ${VW}x${VH}  duration=${v.duration.toFixed(2)}s  fps=${fpsField}（手入力を使用）`);
   }else{
+    fpsWasAuto=true;
     metaFps=await guessFps(v);
     $('fps').value=metaFps;
     log(`動画: ${f.name}  ${VW}x${VH}  duration=${v.duration.toFixed(2)}s  fps≈${metaFps}（自動検出→共通設定に入力）`,'hi');
@@ -613,7 +614,19 @@ async function loadVideoFile(f){
     log('[load] 警告を確認のうえ続行します','er');
   }
 
-  await extractFrames(v,metaFps,trimS,trimE);
+  // --- 展開: WebCodecs 高速デコードを優先し、不可なら従来方式へフォールバック ---
+  let fast=false;
+  try{
+    fast=await extractByWebCodecs(f,metaFps,fpsWasAuto,trimS,trimE);
+  }catch(err){
+    log('[load] 高速デコード不可 → 従来方式へ: '+((err&&err.message)||err),'er');
+    fast=false;
+  }
+  if(fast==='abort'){ URL.revokeObjectURL(url); refreshButtons(); return; }
+  if(!fast){
+    frames=[]; firstFrameImg=null;
+    await extractFrames(v,metaFps,trimS,trimE);
+  }
   URL.revokeObjectURL(url);
   refreshButtons();
 }
@@ -746,6 +759,218 @@ async function extractBySeek(v,fpsIn,maxF,stride,ctx,trimS=0,trimE=0){
 function seek(v,t){return new Promise(res=>{
   const h=()=>{v.removeEventListener('seeked',h);res();};
   v.addEventListener('seeked',h); v.currentTime=t;});}
+
+/* ============================================================
+   WebCodecs 高速フレーム展開（MP4/MOV）
+   再生もシークもせず VideoDecoder に圧縮データを直接流すため、
+   実時間に縛られない（数倍〜数十倍速）うえ全フレームを漏れなく取得できる。
+   デマルチプレクスは MP4Box.js（CDN 遅延読込）。
+   戻り値: true=成功 / false=フォールバックへ / 'abort'=ユーザー中止
+============================================================ */
+let _mp4boxLoading=null;
+function loadMP4Box(){
+  if(window.MP4Box) return Promise.resolve();
+  if(_mp4boxLoading) return _mp4boxLoading;
+  const urls=[
+    'https://cdnjs.cloudflare.com/ajax/libs/mp4box/0.5.2/mp4box.all.min.js',
+    'https://cdn.jsdelivr.net/npm/mp4box@0.5.2/dist/mp4box.all.min.js'
+  ];
+  _mp4boxLoading=new Promise((res,rej)=>{
+    const tryOne=i=>{
+      if(i>=urls.length){_mp4boxLoading=null;rej(new Error('MP4Box.js のCDN読込に失敗'));return;}
+      const s=document.createElement('script');
+      s.src=urls[i]; s.onload=()=>res(); s.onerror=()=>tryOne(i+1);
+      document.head.appendChild(s);
+    };
+    tryOne(0);
+  });
+  return _mp4boxLoading;
+}
+// コーデック初期化データ（avcC/hvcC等）をボックスから取り出す
+function wcDescription(mp4,trackId){
+  const trak=mp4.getTrackById(trackId);
+  for(const e of trak.mdia.minf.stbl.stsd.entries){
+    const box=e.avcC||e.hvcC||e.vpcC||e.av1C;
+    if(box){
+      const ds=new DataStream(undefined,0,DataStream.BIG_ENDIAN);
+      box.write(ds);
+      return new Uint8Array(ds.buffer,8);   // 先頭8byte（サイズ+タイプ）を除去
+    }
+  }
+  return undefined;
+}
+// トラック行列から回転角（0/90/180/270）を推定（iPhone縦撮り対応）
+function trackRotation(track){
+  const m=track.matrix; if(!m) return 0;
+  const a=m[0]/65536, b=m[1]/65536;
+  const ang=Math.round(Math.atan2(b,a)*180/Math.PI);
+  return ((ang%360)+360)%360;
+}
+function drawFrameRot(cctx,frame,rot){
+  cctx.save();
+  if(rot===90){cctx.translate(VW,0);cctx.rotate(Math.PI/2);cctx.drawImage(frame,0,0,VH,VW);}
+  else if(rot===180){cctx.translate(VW,VH);cctx.rotate(Math.PI);cctx.drawImage(frame,0,0,VW,VH);}
+  else if(rot===270){cctx.translate(0,VH);cctx.rotate(-Math.PI/2);cctx.drawImage(frame,0,0,VH,VW);}
+  else cctx.drawImage(frame,0,0,VW,VH);
+  cctx.restore();
+}
+function finishExtractUI(fpsIn,stride,trimS,trimE,method){
+  $('loadbar').style.width='100%';
+  $('vidInfo').innerHTML=`<b>${frames.length}</b> frames / ${VW}×${VH} / fps=${fpsIn}`
+    +(method?` / ${method}`:'')
+    +` / 区間 ${trimS.toFixed(1)}–${trimE.toFixed(1)}s`
+    +(stride>1?` / 間引き×${stride}（実効fps≈${(fpsIn/stride).toFixed(1)}）`:'');
+  log(`フレーム展開完了: ${frames.length} 枚`,'ok');
+  if($('runOrbit')) $('runOrbit').disabled=false;
+  if(stride>1) log(`※ 間引き×${stride} のため実効サンプリングは ${(fpsIn/stride).toFixed(1)}fps 相当`,'hi');
+}
+
+async function extractByWebCodecs(f,metaFps,fpsWasAuto,trimS,trimE){
+  if(!('VideoDecoder' in window)) { log('[fast] WebCodecs 非対応ブラウザ → 従来方式','er'); return false; }
+  const isMp4=/\.(mp4|m4v|mov)$/i.test(f.name)||/mp4|quicktime/.test(f.type);
+  if(!isMp4){ log('[fast] MP4/MOV以外（webm等）→ 従来方式','' ); return false; }
+  await loadMP4Box();
+
+  const stride=Math.max(1,parseInt($('stride').value)||1);
+  const mp4=MP4Box.createFile();
+  const sampleQ=[];                 // デマルチプレクス済みサンプル
+  let stopFeed=false, mp4Err=null;
+
+  const readyP=new Promise((res)=>{ mp4.onReady=info=>res(info); });
+  mp4.onError=e=>{ mp4Err=e; stopFeed=true; };
+
+  // --- フェーズ1: ファイルをチャンク投入（moov 取得まで、または範囲超過まで） ---
+  const CH=16*1024*1024;
+  let off=0, info=null;
+  async function feedSome(untilReady){
+    while(off<f.size && !stopFeed){
+      const ab=await f.slice(off,Math.min(off+CH,f.size)).arrayBuffer();
+      ab.fileStart=off; off+=ab.byteLength;
+      mp4.appendBuffer(ab);
+      $('loadbar').style.width=`${Math.min(30,30*off/f.size)}%`;
+      $('vidInfo').textContent=`高速デコード準備中… ${(off/1e6).toFixed(0)}/${(f.size/1e6).toFixed(0)}MB`;
+      await tick();
+      if(untilReady && info) return;
+    }
+  }
+  // moov が先頭にあるファイルは最初の数チャンクで onReady が来る。
+  // 末尾にある（iPhone MOV等）場合は全量読み込みが必要。
+  readyP.then(i=>{info=i;});
+  await feedSome(true);
+  if(!info){ await feedSome(false); }        // moov が末尾 → 最後まで投入
+  if(mp4Err) { log('[fast] MP4解析エラー → 従来方式: '+mp4Err,'er'); return false; }
+  info=info||await Promise.race([readyP,new Promise(r=>setTimeout(()=>r(null),3000))]);
+  if(!info || !info.videoTracks || !info.videoTracks.length){
+    log('[fast] 動画トラックを特定できず → 従来方式','er'); return false;
+  }
+  const track=info.videoTracks[0];
+
+  // --- 実フレームレートをコンテナから算定（スロー撮影でも正確） ---
+  const trackFps=track.nb_samples/(track.duration/track.timescale);
+  if(fpsWasAuto && isFinite(trackFps) && trackFps>0 && Math.abs(trackFps-metaFps)/trackFps>0.08){
+    log(`[fast] コンテナ実フレームレート ${trackFps.toFixed(1)}fps を検出（推定${metaFps}fpsから更新）`,'hi');
+    metaFps=Math.round(trackFps*100)/100;
+    $('fps').value=metaFps;
+    // 見積もりを更新し、危険なら再確認
+    const est2=Math.max(1,Math.floor((trimE-trimS)*metaFps/stride));
+    $('maxFrames').value=est2;
+    const gb2=est2*VW*VH*4/1073741824*2;
+    if(gb2>2 && !window.confirm(
+`実フレームレートが ${metaFps}fps と判明し、必要メモリの見積もりが増えました。
+
+約${est2}枚 / magnify実行時 計${gb2.toFixed(2)}GB
+
+続行しますか？（キャンセル=中止して区間・strideを調整）`)){
+      log('[fast] 見積もり再確認により中止しました','hi');
+      $('vidInfo').innerHTML='<span style="color:var(--warn)">読み込み中止。区間・strideを調整してください</span>';
+      $('loadbar').style.width='0';
+      return 'abort';
+    }
+  }
+  const maxF=parseInt($('maxFrames').value)||0;
+
+  // --- デコーダ構成 ---
+  let description; try{ description=wcDescription(mp4,track.id); }catch(e){ description=undefined; }
+  const config={codec:track.codec, codedWidth:track.video.width, codedHeight:track.video.height};
+  if(description) config.description=description;
+  let sup=null;
+  try{ sup=await VideoDecoder.isConfigSupported(config); }catch(e){ sup={supported:false}; }
+  if(!sup.supported){ log(`[fast] コーデック ${track.codec} はWebCodecs非対応 → 従来方式`,'er'); return false; }
+
+  const rot=trackRotation(track);
+  if(rot) log(`[fast] 回転メタデータ ${rot}° を補正して展開します`,'');
+  const cnv=document.createElement('canvas'); cnv.width=VW; cnv.height=VH;
+  const cctx=cnv.getContext('2d',{willReadFrequently:true});
+
+  let seen=0, decErr=null;
+  const decoder=new VideoDecoder({
+    output:frame=>{
+      const t=frame.timestamp/1e6;
+      if(t>=trimS && t<trimE && !(maxF&&frames.length>=maxF)){
+        if(seen%stride===0){
+          drawFrameRot(cctx,frame,rot);
+          frames.push(cctx.getImageData(0,0,VW,VH));
+          if(frames.length===1){firstFrameImg=frames[0];drawPick();}
+          if(frames.length%40===0){
+            $('loadbar').style.width=`${30+Math.min(69,69*(t-trimS)/Math.max(0.1,trimE-trimS))}%`;
+            $('vidInfo').textContent=`高速デコード中 ${frames.length} frames（${t.toFixed(1)}s / ${trimE.toFixed(1)}s）…`;
+          }
+        }
+        seen++;
+      }
+      frame.close();
+    },
+    error:e=>{ decErr=e; }
+  });
+  decoder.configure(config);
+
+  // --- フェーズ2: サンプル抽出（残りのファイルも必要なら投入しつつ） ---
+  mp4.onSamples=(id,u,samples)=>{
+    for(const s of samples){
+      sampleQ.push(s);
+      if(s.cts/s.timescale > trimE+0.5) stopFeed=true;  // 範囲超過で投入打ち切り
+    }
+  };
+  mp4.setExtractionOptions(track.id,null,{nbSamples:300});
+  mp4.start();
+  if(off<f.size && !stopFeed) await feedSome(false);
+  mp4.flush();
+
+  if(!sampleQ.length){ log('[fast] サンプル抽出できず → 従来方式','er'); try{decoder.close();}catch(e){} return false; }
+
+  // trimS 直前のキーフレームからデコード開始（それ以前は投入不要）
+  let start=0;
+  for(let i=0;i<sampleQ.length;i++){
+    const s=sampleQ[i];
+    if(s.is_sync && s.cts/s.timescale<=trimS) start=i;
+    if(s.cts/s.timescale>trimS) break;
+  }
+  const t0=performance.now();
+  for(let i=start;i<sampleQ.length;i++){
+    if(decErr) break;
+    const s=sampleQ[i];
+    const tSec=s.cts/s.timescale;
+    if(tSec>trimE+0.5) break;
+    if(maxF && frames.length>=maxF) break;
+    decoder.decode(new EncodedVideoChunk({
+      type:s.is_sync?'key':'delta',
+      timestamp:Math.round(1e6*s.cts/s.timescale),
+      duration:Math.round(1e6*(s.duration||1)/s.timescale),
+      data:s.data
+    }));
+    sampleQ[i]=null;                                   // メモリ解放
+    if(decoder.decodeQueueSize>80) await new Promise(r=>setTimeout(r,4)); // 背圧
+    if(i%400===0) await tick();
+  }
+  try{ await decoder.flush(); }catch(e){ if(!frames.length){ log('[fast] デコード失敗 → 従来方式: '+e.message,'er'); return false; } }
+  try{ decoder.close(); }catch(e){}
+  if(decErr && !frames.length){ log('[fast] デコードエラー → 従来方式: '+decErr.message,'er'); return false; }
+  if(!frames.length){ log('[fast] 指定区間にフレームがありません → 従来方式','er'); return false; }
+
+  log(`[fast] WebCodecs 展開完了: ${frames.length} 枚を ${((performance.now()-t0)/1000).toFixed(1)} 秒でデコード（全フレーム取得・取りこぼしなし）`,'ok');
+  finishExtractUI(metaFps,stride,trimS,trimE,'高速デコード');
+  return true;
+}
 
 /* ============================================================
    先頭フレーム描画 + ROIクリック
