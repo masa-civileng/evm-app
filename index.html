@@ -392,6 +392,7 @@ let firstFrameImg=null; // 先頭 ImageData
 let VW=640, VH=480;
 let magFrames=[];       // 増幅後 ImageData
 let lastDx=null,lastDy=null,lastFps=null;
+let lastAutoFps=0;      // 直近に自動入力した fps（次回読込時に自動扱いを引き継ぐ）
 let lastFFT=null;   // {freq, magX, magY, peaksX, peaksY} FFT結果CSV用
 let roiClicks=[];
 let dragging=false, dragStart=null, dragCur=null;   // ドラッグ矩形ROI用
@@ -420,7 +421,7 @@ window.addEventListener('DOMContentLoaded',()=>{
 /* ============================================================
    OpenCV ready — 複数CDNを順に試す
 ============================================================ */
-const APP_VER='v2026-07-05a (WebCodecs高速デコード対応)';
+const APP_VER='v2026-07-05b (HEVC対応強化)';
 const OCV_CDNS=[
   "https://docs.opencv.org/4.10.0/opencv.js",
   "https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js",
@@ -497,6 +498,16 @@ $('file').onchange=e=>{const f=e.target.files[0]; if(f) loadVideoFile(f);};
     if(!dz.contains(e.target)) e.preventDefault();}));
 })();
 
+/* 処理解像度の長辺上限を VW/VH に適用（偶数丸め: pyrDown 安定用） */
+function applyProcCap(){
+  const procCap=parseInt($('procMax').value)||0;
+  if(procCap>0 && Math.max(VW,VH)>procCap){
+    const sc=procCap/Math.max(VW,VH), ow=VW, oh=VH;
+    VW=Math.max(2,Math.round(VW*sc/2)*2);
+    VH=Math.max(2,Math.round(VH*sc/2)*2);
+    log(`[load] 処理解像度を縮小: ${ow}x${oh} → ${VW}x${VH}（約${(ow*oh/(VW*VH)).toFixed(1)}分の1のメモリ）`,'hi');
+  }
+}
 async function loadVideoFile(f){
   frames=[]; magFrames=[]; firstFrameImg=null; roiClicks=[];
   dragging=false; dragStart=null; dragCur=null; lastFFT=null;
@@ -543,14 +554,12 @@ async function loadVideoFile(f){
   }
   VW=v.videoWidth; VH=v.videoHeight;
   log(`[load] メタデータ取得: ${VW}x${VH} duration=${v.duration.toFixed(2)}s`,'');
-  // 処理解像度の長辺上限（drawImage で縮小されるので grab() 側の変更は不要）
-  const procCap=parseInt($('procMax').value)||0;
-  if(procCap>0 && Math.max(VW,VH)>procCap){
-    const s=procCap/Math.max(VW,VH);
-    const ow=VW, oh=VH;
-    VW=Math.max(2,Math.round(VW*s/2)*2);   // 偶数に丸め（pyrDown 安定用）
-    VH=Math.max(2,Math.round(VH*s/2)*2);
-    log(`[load] 処理解像度を縮小: ${ow}x${oh} → ${VW}x${VH}（約${(ow*oh/(VW*VH)).toFixed(1)}分の1のメモリ）`,'hi');
+  // <video> が再生できないコーデック（iPhone標準の HEVC 等）は縦横が 0x0 になる
+  const noNativeDecode=(!VW||!VH);
+  if(noNativeDecode){
+    log('[load] ブラウザの<video>がこの動画をデコードできません（0x0）。iPhone標準の HEVC(H.265) の可能性が高いです。WebCodecs 直接デコードを試します…','er');
+  }else{
+    applyProcCap();   // 処理解像度の長辺上限
   }
   const estMB=VW*VH*4/1048576;
 
@@ -565,16 +574,18 @@ async function loadVideoFile(f){
   const spanSec=trimE-trimS;
 
   // --- fps の決定（0=自動検出して「共通設定」に自動入力 / 手入力があればそれを優先） ---
+  // 前回の自動入力値がそのまま残っている場合は「自動」として扱う（誤って固定化しない）
   const fpsField=parseFloat($('fps').value);
   let metaFps, fpsWasAuto=false;
-  if(fpsField>0){
+  if(fpsField>0 && fpsField!==lastAutoFps){
     metaFps=fpsField;
     log(`動画: ${f.name}  ${VW}x${VH}  duration=${v.duration.toFixed(2)}s  fps=${fpsField}（手入力を使用）`);
   }else{
     fpsWasAuto=true;
-    metaFps=await guessFps(v);
+    metaFps=noNativeDecode?30:await guessFps(v);   // 再生不可なら推定不能→仮値30（後段のWebCodecsが実測で補正）
+    lastAutoFps=metaFps;
     $('fps').value=metaFps;
-    log(`動画: ${f.name}  ${VW}x${VH}  duration=${v.duration.toFixed(2)}s  fps≈${metaFps}（自動検出→共通設定に入力）`,'hi');
+    log(`動画: ${f.name}  ${VW}x${VH}  duration=${v.duration.toFixed(2)}s  fps≈${metaFps}（自動検出→共通設定に入力${noNativeDecode?'・仮値':''}）`,'hi');
     log('※ スロー撮影動画などで実際の撮影fpsと異なる場合は、fps欄を手動で修正して読み込み直してください','');
   }
 
@@ -606,7 +617,7 @@ async function loadVideoFile(f){
 対策の目安（いずれか）:
  ・読込区間を ${sugSec} 秒以下にする（現在 ${spanSec.toFixed(1)} 秒）
  ・stride を ${sugStride} 以上にする（実効fpsが下がる点に注意）
- ・処理解像度 長辺上限を下げる（現在 ${procCap||'原寸'}）
+ ・処理解像度 長辺上限を下げる（現在 ${parseInt($('procMax').value)||'原寸'}）
 
 このまま読み込みを続けますか？
 （OK=続行 / キャンセル=中止して設定を変更）`;
@@ -631,6 +642,18 @@ async function loadVideoFile(f){
   }
   if(fast==='abort'){ URL.revokeObjectURL(url); refreshButtons(); return; }
   if(!fast){
+    if(noNativeDecode){
+      // <video> も WebCodecs も不可 → 従来方式に落としても永遠に進まないため、明確に案内して終了
+      log('=== この動画はこのPC・ブラウザではデコードできません ===','er');
+      log('原因: iPhone標準の HEVC(H.265) コーデックにブラウザ/OSが対応していないためです。対処は次のいずれか:','hi');
+      log(' ① Windows: Microsoft Store で「HEVC ビデオ拡張機能」をインストール（再起動後に Chrome/Edge で再生可能になる場合があります）','hi');
+      log(' ② iPhone側: 設定 → カメラ → フォーマット → 「互換性優先」にして撮影すると H.264 になり、どのPCでも読めます（今後の撮影におすすめ）','hi');
+      log(' ③ 変換: ffmpeg -i 入力.MOV -c:v libx264 -pix_fmt yuv420p -an 出力.mp4','hi');
+      log(' ④ iPhoneの Safari でこのページを開けばそのまま解析できます（HEVC対応のため）','hi');
+      $('vidInfo').innerHTML='<span style="color:var(--warn)">読込不可: HEVC(H.265) 非対応環境です。ログの対処法を参照してください</span>';
+      $('loadbar').style.width='0';
+      URL.revokeObjectURL(url); refreshButtons(); return;
+    }
     frames=[]; firstFrameImg=null;
     await extractFrames(v,metaFps,trimS,trimE);
   }
@@ -672,6 +695,10 @@ async function guessFps(v){
    1フレームごとの seek 往復を避けるため 6000fr でも実時間ベースで終わる。
    stride>1 で間引き、maxF で上限。rVFC 非対応ブラウザは seek 方式にフォールバック。*/
 async function extractFrames(v,metaFps,trimS=0,trimE=0){
+  if(!VW||!VH){
+    log('[load] 解像度不明（ブラウザ非対応コーデック）のため従来方式では展開できません','er');
+    return;
+  }
   const fpsIn=parseFloat($('fps').value)||metaFps||30;
   const maxF=parseInt($('maxFrames').value)||0;
   const stride=Math.max(1,parseInt($('stride').value)||1);
@@ -872,6 +899,30 @@ async function extractByWebCodecs(f,metaFps,fpsWasAuto,trimS,trimE){
   }
   const track=info.videoTracks[0];
 
+  // --- <video> が 0x0 のとき（HEVC等）は解像度をコンテナから取得 ---
+  if(!VW||!VH){
+    const rot0=trackRotation(track);
+    let w=track.video.width, h=track.video.height;
+    if(rot0===90||rot0===270){const t=w;w=h;h=t;}
+    VW=w; VH=h;
+    log(`[fast] 解像度をコンテナから取得: ${VW}x${VH}`,'');
+    applyProcCap();
+    // ここで初めて正確な見積もりが可能になる
+    const strideNow=Math.max(1,parseInt($('stride').value)||1);
+    const estN=Math.max(1,Math.floor((trimE-trimS)*metaFps/strideNow));
+    const gbN=estN*VW*VH*4/1073741824*2;
+    log(`[fast] 見積もり更新: 約${estN}枚 / magnify実行時 計${gbN.toFixed(2)}GB`, gbN>2?'er':'');
+    if(gbN>2 && !window.confirm(
+`必要メモリの見積もり: 約${estN}枚 / magnify実行時 計${gbN.toFixed(2)}GB。
+ブラウザのタブが落ちる可能性があります。続行しますか？
+（キャンセル=中止して区間・stride・解像度を調整）`)){
+      log('[fast] 見積もり確認により中止しました','hi');
+      $('vidInfo').innerHTML='<span style="color:var(--warn)">読み込み中止。区間・stride・解像度を調整してください</span>';
+      $('loadbar').style.width='0';
+      return 'abort';
+    }
+  }
+
   // --- 実フレームレートをコンテナから算定（スロー撮影でも正確） ---
   const trackFps=track.nb_samples/(track.duration/track.timescale);
   if(fpsWasAuto && isFinite(trackFps) && trackFps>0 && Math.abs(trackFps-metaFps)/trackFps>0.08){
@@ -898,11 +949,21 @@ async function extractByWebCodecs(f,metaFps,fpsWasAuto,trimS,trimE){
 
   // --- デコーダ構成 ---
   let description; try{ description=wcDescription(mp4,track.id); }catch(e){ description=undefined; }
-  const config={codec:track.codec, codedWidth:track.video.width, codedHeight:track.video.height};
-  if(description) config.description=description;
-  let sup=null;
-  try{ sup=await VideoDecoder.isConfigSupported(config); }catch(e){ sup={supported:false}; }
-  if(!sup.supported){ log(`[fast] コーデック ${track.codec} はWebCodecs非対応 → 従来方式`,'er'); return false; }
+  // コーデック文字列の表記ゆれで弾かれることがあるため候補を順に試す
+  // （例: mp4box は hvc1.1.6.L120.b0 と小文字で返すが、仕様上は B0）
+  const codecCands=[track.codec];
+  const upVariant=track.codec.split('.').map((seg,i)=>i>=3?seg.toUpperCase():seg).join('.');
+  if(upVariant!==track.codec) codecCands.push(upVariant);
+  let config=null;
+  for(const cs of codecCands){
+    const c={codec:cs, codedWidth:track.video.width, codedHeight:track.video.height};
+    if(description) c.description=description;
+    try{
+      const sup=await VideoDecoder.isConfigSupported(c);
+      if(sup.supported){ config=c; break; }
+    }catch(e){ /* 次の候補へ */ }
+  }
+  if(!config){ log(`[fast] コーデック ${track.codec} はWebCodecs非対応 → 従来方式`,'er'); return false; }
 
   const rot=trackRotation(track);
   if(rot) log(`[fast] 回転メタデータ ${rot}° を補正して展開します`,'');
