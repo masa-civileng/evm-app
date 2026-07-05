@@ -105,7 +105,7 @@
 <header>
   <h1>EVM&nbsp;Web</h1>
   <span class="sub">Eulerian Video Magnification — 微小な動きの増幅と卓越振動数解析</span>
-  <span class="ref">Wu et&nbsp;al., SIGGRAPH 2012 (MIT CSAIL) / ブラウザ完結版</span>
+  <span class="ref">Wu et&nbsp;al., SIGGRAPH 2012 (MIT CSAIL) / ブラウザ完結版 <b id="appVer"></b></span>
 </header>
 
 <main>
@@ -410,10 +410,17 @@ let pinchPrev=null;                   // タッチのピンチ状態 {dist, cx, 
 
 const $=id=>document.getElementById(id);
 const log=(m,c='')=>{const l=$('log');l.innerHTML+=`<span class="${c}">${m}</span>\n`;l.scrollTop=l.scrollHeight;};
+// バージョン表示（ヘッダ＋ログ）: 配布先で新旧どちらが動いているか即判別できる
+window.addEventListener('DOMContentLoaded',()=>{
+  if($('appVer')) $('appVer').textContent=APP_VER;
+  log(`アプリ起動: ${APP_VER}`,'hi');
+  log('※ GitHub Pages で旧バージョンが表示される場合はキャッシュ削除（PC: Ctrl+F5 / スマホ: ブラウザのキャッシュ消去 or シークレットタブ）','');
+});
 
 /* ============================================================
    OpenCV ready — 複数CDNを順に試す
 ============================================================ */
+const APP_VER='v2026-07-05a (WebCodecs高速デコード対応)';
 const OCV_CDNS=[
   "https://docs.opencv.org/4.10.0/opencv.js",
   "https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js",
